@@ -40,7 +40,7 @@ class LangHandler:
 
     _langs: dict[str, dict[str, str]] = {}
     _local_langs: dict[str, dict[str, str]] = {}
-    _default_lang: str = "EN"
+    _default_lang: str = "VN"
 
     @classmethod
     def init(
@@ -59,6 +59,7 @@ class LangHandler:
         Returns:
             LangHandler: The class itself with loaded languages.
         """
+        cls._default_lang = (getattr(Config(), "default_language", None) or os.getenv("DEFAULT_LANGUAGE", "VN")).upper()
         targets = [
             (langs_dir, cls._langs, "language"),
             (local_langs_dir, cls._local_langs, "local language"),
@@ -79,6 +80,11 @@ class LangHandler:
                             logger.info(f"Loaded {label}: {lang_code}")
                     except Exception as e:
                         logger.error(f"Failed to load {label} file '{filepath}': {e}")
+
+        if cls._default_lang not in cls._langs:
+            fallback_lang = "VN" if "VN" in cls._langs else "EN"
+            logger.warning("Default language '%s' is not available. Falling back to '%s'.", cls._default_lang, fallback_lang)
+            cls._default_lang = fallback_lang
 
         return cls
     

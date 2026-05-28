@@ -36,6 +36,7 @@ from voicelink.utils import dispatch_message
 
 class Translator(discord.app_commands.Translator):
     MISSING_TRANSLATOR: dict[str, list[str]] = {}
+    MESSAGE_TO_DISCORD_LOCALE = {"VN": "VI"}
 
     async def load(self):
         func.logger.info("Loaded Translator")
@@ -57,6 +58,10 @@ class Translator(discord.app_commands.Translator):
         translated_text = local_translations.get(string.message)
         if translated_text is not None:
             return translated_text
+
+        expected_locale = self.MESSAGE_TO_DISCORD_LOCALE.get(LangHandler._default_lang, LangHandler._default_lang)
+        if locale_key != expected_locale:
+            return None
 
         missing = self.MISSING_TRANSLATOR.setdefault(locale_key, [])
         if string.message not in missing:

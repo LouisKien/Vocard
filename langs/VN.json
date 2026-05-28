@@ -16,7 +16,8 @@
             "noPlaySource": "Không thể tìm thấy nguồn phát nào!",
             "noPlayer": "Không tìm thấy trình phát nào trên máy chủ này.",
             "noTrackPlaying": "Hiện tại không có bài hát nào đang phát",
-            "noTrackFound": "Không tìm thấy bài hát nào với truy vấn đó! Vui lòng cung cấp url hợp lệ."
+            "noTrackFound": "Không tìm thấy bài hát nào với truy vấn đó! Vui lòng cung cấp url hợp lệ.",
+            "trackPlaybackFailed": "Không thể phát bài này. Mình sẽ bỏ qua và phát bài tiếp theo sau 5 giây."
         },
         "dropdown": {
             "trackSelect": "Chọn một bài hát để bỏ qua đến ...",

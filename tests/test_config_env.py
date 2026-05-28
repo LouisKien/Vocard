@@ -69,6 +69,7 @@ def test_load_settings_uses_defaults_and_env_overrides() -> None:
         BOT_ACTIVITY_JSON=json.dumps(
             [{"type": "listening", "name": "/music", "status": "idle"}]
         ),
+        DEFAULT_LANGUAGE="VN",
         BOT_ACCESS_USER_IDS="11,22,33",
         DEFAULT_MAX_QUEUE="42",
         LOG_FILE_ENABLE="false",
@@ -95,6 +96,7 @@ print(json.dumps(load_settings(), sort_keys=True))
     assert settings["default_max_queue"] == 42
     assert settings["bot_access_user"] == [11, 22, 33]
     assert settings["activity"] == [{"type": "listening", "name": "/music", "status": "idle"}]
+    assert settings["default_language"] == "VN"
     assert settings["logging"]["file"]["enable"] is False
     assert settings["playlist_settings"]["default_playlist_name"] == "Pinned"
     assert settings["timer_settings"]["inactive_player_cleanup"] == 321
@@ -147,7 +149,7 @@ print(json.dumps({
 def test_load_settings_accepts_legacy_env_aliases() -> None:
     env = base_env(
         BOT_TOKEN="legacy-discord-token",
-        DISCORD_GUILD_ID="1231657902280937694",
+        DISCORD_GUILD_ID="123456789012345678",
         BOT_NAME="CatFanSiTa",
         MONGODB_URL="mongodb://mongodb:27017",
         MONGODB_NAME="vocard",
@@ -165,14 +167,14 @@ print(json.dumps(load_settings(), sort_keys=True))
     settings = json.loads(result.stdout)
 
     assert settings["token"] == "legacy-discord-token"
-    assert settings["server_id"] == 1231657902280937694
+    assert settings["server_id"] == 123456789012345678
     assert settings["bot_name"] == "CatFanSiTa"
 
 
 def test_config_accepts_legacy_env_aliases() -> None:
     env = base_env(
         BOT_TOKEN="legacy-discord-token",
-        DISCORD_GUILD_ID="1231657902280937694",
+        DISCORD_GUILD_ID="123456789012345678",
     )
     result = run_repo_python(
         """
@@ -192,7 +194,7 @@ print(json.dumps({
     payload = json.loads(result.stdout)
 
     assert payload["token"] == "legacy-discord-token"
-    assert payload["server_id"] == 1231657902280937694
+    assert payload["server_id"] == 123456789012345678
     assert payload["bot_name"] == "Vocard"
 
 
@@ -230,6 +232,14 @@ def test_lavalink_audio_quality_profile_is_high() -> None:
     assert "opusEncodingQuality: 10" in application_yml
     assert "resamplingQuality: HIGH" in application_yml
     assert "frameBufferDurationMs: 10000" in application_yml
+
+
+def test_youtube_source_has_current_playback_fallback_client() -> None:
+    application_yml = (ROOT / "lavalink" / "application.yml").read_text(encoding="utf8")
+
+    assert "\n    clients:\n" in application_yml
+    assert "- TVHTML5_SIMPLY" in application_yml
+    assert "TVHTML5EMBEDDED" not in application_yml
 
 
 def test_main_uses_path_safe_cog_loading() -> None:

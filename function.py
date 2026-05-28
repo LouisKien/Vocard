@@ -145,6 +145,10 @@ def load_settings() -> dict[str, Any]:
     if bot_name not in {None, ""}:
         settings["bot_name"] = bot_name
 
+    default_language = _get_env("DEFAULT_LANGUAGE")
+    if default_language not in {None, ""}:
+        settings["default_language"] = default_language.upper()
+
     server_id = _parse_int(_get_first_env("SERVER_ID", "DISCORD_GUILD_ID"))
     if server_id is not None:
         settings["server_id"] = server_id

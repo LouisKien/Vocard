@@ -374,6 +374,10 @@ class Node:
         return info
 
     @staticmethod
+    def _normalize_query(query: str) -> str:
+        return query.strip()
+
+    @staticmethod
     def _spotify_partner_api_for_query(query: str) -> Optional[bool]:
         match = SPOTIFY_URL_REGEX.match(query)
         if not match:
@@ -423,6 +427,7 @@ class Node:
         You can also pass in a discord.py Context object to get a
         Context object on any track you search.
         """
+        query = self._normalize_query(query)
         if not search_type:
             search_type = Config().search_platform
             

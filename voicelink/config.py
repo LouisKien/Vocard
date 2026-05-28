@@ -78,6 +78,7 @@ class Config:
 
         self.token: str = settings.get("token") or os.getenv("DISCORD_TOKEN") or os.getenv("BOT_TOKEN") or os.getenv("TOKEN")
         self.bot_name: str = settings.get("bot_name") or os.getenv("BOT_NAME") or "Vocard"
+        self.default_language: str = (settings.get("default_language") or os.getenv("DEFAULT_LANGUAGE") or "VN").upper()
 
         client_id = settings.get("client_id")
         env_client_id = os.getenv("CLIENT_ID")

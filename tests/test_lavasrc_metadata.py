@@ -124,3 +124,7 @@ def test_spotify_urls_select_lavasrc_api_mode() -> None:
         "https://open.spotify.com/track/190jyVPHYjAqEaOGmMzdyk?si=abc"
     ) is False
     assert Node._spotify_partner_api_for_query("https://www.youtube.com/watch?v=dQw4w9WgXcQ") is None
+
+
+def test_track_query_is_trimmed_before_lavalink_loading() -> None:
+    assert Node._normalize_query(" https://youtu.be/YGzQTjvrC2o?si=abc ") == "https://youtu.be/YGzQTjvrC2o?si=abc"

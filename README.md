@@ -40,7 +40,7 @@ Fill these in `.env` before production use:
 - `LAVALINK_HOST`, `LAVALINK_PORT`, `LAVALINK_PASSWORD`.
 - `LAVASRC_SPOTIFY_CLIENT_ID`, `LAVASRC_SPOTIFY_CLIENT_SECRET`.
 
-`CLIENT_ID` is optional; the bot derives it from Discord after login.
+`CLIENT_ID` is optional; the bot derives it from Discord after login. `DEFAULT_LANGUAGE=VN` is the homelab default; message strings use `langs/VN.json`, and Discord slash-command localization uses `local_langs/vi.json`.
 
 ## Spotify Notes
 
@@ -91,6 +91,7 @@ This fork defaults to homelab-safe operation:
 - MongoDB and Lavalink are only reachable on the internal Compose network.
 - Bot logs go to Docker stdout/stderr by default via `LOG_FILE_ENABLE=false`.
 - Lavalink built-in YouTube is disabled; the pinned YouTube plugin handles search.
+- YouTube playback uses `TVHTML5_SIMPLY` and `MWEB` as extra fallback clients for `youtube-source 1.18.1`.
 - Audio quality is set high with `opusEncodingQuality: 10`, `resamplingQuality: HIGH`, and a larger frame buffer.
 - Upstream update checks are disabled by default with `CHECK_UPSTREAM_UPDATES=false`.
 

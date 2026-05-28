@@ -32,6 +32,38 @@ from discord.ext import commands
 from voicelink import MongoDBHandler, Config
 from voicelink.utils import TempCtx
 
+TRACK_EXCEPTION_STACK_MARKERS = (
+    "All clients failed",
+    "Client [",
+    "YoutubeAudioTrack",
+    "dev.lavalink.youtube",
+    "com.sedmelluq.discord.lavaplayer",
+    "Video player configuration error",
+)
+DEFAULT_TRACK_EXCEPTION_MESSAGE = "Không thể phát bài này. Mình sẽ bỏ qua và phát bài tiếp theo sau 5 giây."
+
+def sanitize_track_exception_message(
+    error: dict,
+    *,
+    source_name: str = "",
+    fallback: str = DEFAULT_TRACK_EXCEPTION_MESSAGE,
+) -> str:
+    raw_message = str(error.get("message") or error.get("cause") or "").strip()
+    if not raw_message:
+        return fallback
+
+    if any(marker in raw_message for marker in TRACK_EXCEPTION_STACK_MARKERS):
+        return fallback
+
+    first_line = raw_message.splitlines()[0].strip()
+    if not first_line:
+        return fallback
+
+    if source_name.lower() == "youtube" and "not available" in first_line.lower():
+        return fallback
+
+    return first_line[:240]
+
 class Listeners(commands.Cog):
     """Music Cog."""
 
@@ -145,7 +177,20 @@ class Listeners(commands.Cog):
     async def on_voicelink_track_exception(self, player: voicelink.Player, track, error: dict):
         try:
             player._track_is_stuck = True
-            await player.context.send(f"{error['message']} The next song will begin in the next 5 seconds.", delete_after=10)
+            fallback = player.get_msg("player.errors.trackPlaybackFailed")
+            if fallback == "Not found!":
+                fallback = DEFAULT_TRACK_EXCEPTION_MESSAGE
+
+            source_name = getattr(track, "source", "") or getattr(track, "source_name", "")
+            message = sanitize_track_exception_message(error, source_name=source_name, fallback=fallback)
+            raw_error = str(error.get("message") or error.get("cause") or error).strip()
+            log_message = (raw_error.splitlines()[0].strip() if raw_error else "Unknown playback failure")[:240]
+            func.logger.warning(
+                "Track playback failed in guild %s: %s",
+                player.guild.id,
+                log_message,
+            )
+            await player.context.send(message, delete_after=10)
         except:
             pass
 

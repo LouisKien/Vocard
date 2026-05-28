@@ -3,6 +3,7 @@
     "client_id": 0,
     "server_id": 0,
     "bot_name": "Vocard",
+    "default_language": "VN",
     "genius_token": "",
     "mongodb_url": "",
     "mongodb_name": "",

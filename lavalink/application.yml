@@ -41,6 +41,8 @@ plugins:
     allowDirectPlaylistIds: true
     clients:
       - MUSIC
+      - TVHTML5_SIMPLY
+      - MWEB
       - ANDROID_VR
       - WEB
       - WEBEMBEDDED
