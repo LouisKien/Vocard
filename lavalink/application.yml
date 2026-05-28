@@ -1,0 +1,102 @@
+plugins:
+  lavasrc:
+    providers:
+      - 'ytsearch:"%ISRC%"'
+      - "ytsearch:%QUERY%"
+    sources:
+      spotify: ${LAVASRC_SPOTIFY_ENABLED:${SPOTIFY_ENABLED:false}}
+      applemusic: false
+      deezer: false
+      yandexmusic: false
+      flowerytts: false
+      youtube: false
+      vkmusic: false
+      tidal: false
+      qobuz: false
+      ytdlp: false
+      jiosaavn: false
+    lyrics-sources:
+      spotify: false
+      deezer: false
+      youtube: false
+      yandexmusic: false
+      vkmusic: false
+      lrcLib: true
+    spotify:
+      clientId: ${LAVASRC_SPOTIFY_CLIENT_ID:${SPOTIFY_CLIENT_ID:}}
+      clientSecret: ${LAVASRC_SPOTIFY_CLIENT_SECRET:${SPOTIFY_CLIENT_SECRET:}}
+      spDc: ${LAVASRC_SPOTIFY_SP_DC:${SPOTIFY_SP_DC:}}
+      countryCode: ${LAVASRC_SPOTIFY_COUNTRY_CODE:${SPOTIFY_COUNTRY_CODE:VN}}
+      playlistLoadLimit: ${LAVASRC_SPOTIFY_PLAYLIST_LOAD_LIMIT:6}
+      albumLoadLimit: ${LAVASRC_SPOTIFY_ALBUM_LOAD_LIMIT:6}
+      resolveArtistsInSearch: ${LAVASRC_SPOTIFY_RESOLVE_ARTISTS_IN_SEARCH:true}
+      localFiles: false
+      preferPartnerApi: ${LAVASRC_SPOTIFY_PREFER_PARTNER_API:${SPOTIFY_PREFER_PARTNER_API:true}}
+      preferV1SearchApi: ${LAVASRC_SPOTIFY_PREFER_V1_SEARCH_API:${SPOTIFY_PREFER_V1_SEARCH_API:true}}
+      customTokenEndpoint: ${LAVASRC_SPOTIFY_CUSTOM_TOKEN_ENDPOINT:${SPOTIFY_CUSTOM_TOKEN_ENDPOINT:}}
+  youtube:
+    enabled: true
+    allowSearch: true
+    allowDirectVideoIds: true
+    allowDirectPlaylistIds: true
+    clients:
+      - MUSIC
+      - ANDROID_VR
+      - WEB
+      - WEBEMBEDDED
+
+server:
+  port: 2333
+  address: 0.0.0.0
+  http2:
+    enabled: false
+
+lavalink:
+  plugins:
+    - dependency: "com.github.topi314.lavasrc:lavasrc-plugin:4.8.3"
+    - dependency: "dev.lavalink.youtube:youtube-plugin:1.18.1"
+  server:
+    password: ${LAVALINK_PASSWORD}
+    sources:
+      youtube: false
+      bandcamp: true
+      soundcloud: true
+      twitch: true
+      vimeo: true
+      nico: true
+      http: true
+      local: false
+    filters:
+      volume: true
+      equalizer: true
+      karaoke: true
+      timescale: true
+      tremolo: true
+      vibrato: true
+      distortion: true
+      rotation: true
+      channelMix: true
+      lowPass: true
+    bufferDurationMs: 800
+    frameBufferDurationMs: 10000
+    opusEncodingQuality: 10
+    resamplingQuality: HIGH
+    trackStuckThresholdMs: 10000
+    useSeekGhosting: true
+    youtubePlaylistLoadLimit: 6
+    playerUpdateInterval: 5
+    youtubeSearchEnabled: true
+    soundcloudSearchEnabled: true
+    gc-warnings: true
+
+metrics:
+  prometheus:
+    enabled: false
+    endpoint: /metrics
+
+logging:
+  file:
+    path: ./logs/
+  level:
+    root: INFO
+    lavalink: INFO

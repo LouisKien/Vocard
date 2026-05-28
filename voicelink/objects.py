@@ -35,6 +35,14 @@ from .transformer import encode, decode
 if TYPE_CHECKING:
     from .pool import Node
 
+
+def _first_present(info: dict, *keys: str) -> Optional[str]:
+    for key in keys:
+        value = info.get(key)
+        if value:
+            return value
+    return None
+
     
 class Track:
     """The base track object. Returns critical track information needed for parsing by Lavalink.
@@ -53,6 +61,12 @@ class Track:
         "thumbnail",
         "emoji",
         "length",
+        "album_name",
+        "album_url",
+        "artist_url",
+        "artist_artwork_url",
+        "preview_url",
+        "is_preview",
         "requester",
         "is_stream",
         "is_seekable",
@@ -81,9 +95,15 @@ class Track:
         self.source: str = info.get("sourceName", extract(self.uri).domain)
         self._search_type: SearchType = search_type
 
-        self.thumbnail: str = info.get("artworkUrl")
+        self.thumbnail: Optional[str] = _first_present(info, "artworkUrl", "albumArtUrl", "thumbnail")
         self.emoji: str = Config().get_source_config(self.source, "emoji")
         self.length: float = info.get("length")
+        self.album_name: Optional[str] = _first_present(info, "albumName", "album_name")
+        self.album_url: Optional[str] = _first_present(info, "albumUrl", "album_url")
+        self.artist_url: Optional[str] = _first_present(info, "artistUrl", "artist_url")
+        self.artist_artwork_url: Optional[str] = _first_present(info, "artistArtworkUrl", "artistArtUrl", "artist_artwork_url")
+        self.preview_url: Optional[str] = _first_present(info, "previewUrl", "preview_url")
+        self.is_preview: bool = bool(info.get("isPreview", info.get("is_preview", False)))
         
         self.requester: Member = requester
         self.is_stream: bool = info.get("isStream", False)
@@ -162,6 +182,9 @@ class Playlist:
         "name",
         "thumbnail",
         "uri",
+        "author",
+        "type",
+        "_track_count",
         "tracks"
     )
 
@@ -174,13 +197,16 @@ class Playlist:
     ):
         self.playlist_info: dict = playlist_info
         self.name: str = playlist_info.get("name")
-        self.thumbnail: str = None
-        self.uri: str = None
+        self.thumbnail: Optional[str] = _first_present(playlist_info, "artworkUrl", "thumbnail")
+        self.uri: Optional[str] = _first_present(playlist_info, "url", "uri")
+        self.author: Optional[str] = playlist_info.get("author")
+        self.type: Optional[str] = playlist_info.get("type")
         
         self.tracks = [
             Track(track_id=track["encoded"], info=track["info"], requester=requester)
             for track in tracks
         ]
+        self._track_count: int = int(playlist_info.get("trackCount", len(self.tracks)))
 
     def __str__(self) -> str:
         return self.name
@@ -190,4 +216,4 @@ class Playlist:
 
     @property
     def track_count(self) -> int:
-        return len(self.tracks)
+        return self._track_count

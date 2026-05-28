@@ -1,14 +1,16 @@
 {
-    "token": "YOUR_BOT_TOKEN",
-    "client_id": "YOUR_BOT_CLIENT_ID",
-    "genius_token": "YOUR_GENIUS_TOKEN",
-    "mongodb_url": "YOUR_MONGODB_URL",
-    "mongodb_name": "YOUR_MONGODB_DB_NAME",
+    "token": "",
+    "client_id": 0,
+    "server_id": 0,
+    "bot_name": "Vocard",
+    "genius_token": "",
+    "mongodb_url": "",
+    "mongodb_name": "",
     "nodes": {
         "DEFAULT": {
             "host": "lavalink",
             "port": 2333,
-            "password": "youshallnotpass",
+            "password": "",
             "secure": false,
             "identifier": "DEFAULT",
             "yt_ratelimit": {
@@ -28,7 +30,7 @@
     "logging": {
         "file": {
             "path": "./logs",
-            "enable": true
+            "enable": false
         },
         "level": {
             "discord": "INFO",
@@ -45,7 +47,7 @@
     "ipc_client": {
         "host": "127.0.0.1",
         "port": 8000,
-        "password": "YOUR_PASSWORD",
+        "password": "",
         "secure": false,
         "enable": false
     },
@@ -178,5 +180,7 @@
         "leave": ["stop", "bye"],
         "play": ["p"],
         "view": ["v"]
-    }
+    },
+    "version": "v2.7.3",
+    "check_upstream_updates": false
 }

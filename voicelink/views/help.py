@@ -77,16 +77,17 @@ class HelpView(discord.ui.View):
     def build_embed(self, category: str) -> discord.Embed:
         category = category.lower()
         if category == "news":
-            embed = discord.Embed(title="Vocard Help Menu", url="https://discord.com/channels/811542332678996008/811909963718459392/1069971173116481636", color=Config().embed_color)
+            bot_name = Config().bot_name
+            embed = discord.Embed(title=f"{bot_name} Help Menu", url="https://discord.com/channels/811542332678996008/811909963718459392/1069971173116481636", color=Config().embed_color)
             embed.add_field(
                 name=f"Available Categories: [{2 + len(self.categories)}]",
                 value="```py\n👉 News\n2. Tutorial\n{}```".format("".join(f"{i}. {c}\n" for i, c in enumerate(self.categories, start=3))),
                 inline=True
             )
 
-            update = "Vocard is a simple music bot. It leads to a comfortable experience which is user-friendly, It supports Soundcloud, Spotify, Twitch and more!"
+            update = f"{bot_name} is a simple music bot. It leads to a comfortable experience which is user-friendly, It supports Soundcloud, Spotify, Twitch and more!"
             embed.add_field(name="📰 Information:", value=update, inline=True)
-            embed.add_field(name="Get Started", value="```Join a voice channel and /play {Song/URL} a song. (Names, Video Links or Playlist links are supported on Vocard)```", inline=False)
+            embed.add_field(name="Get Started", value=f"```Join a voice channel and /play {{Song/URL}} a song. (Names, Video Links or Playlist links are supported on {bot_name})```", inline=False)
             
             return embed
 

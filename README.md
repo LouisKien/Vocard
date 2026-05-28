@@ -1,37 +1,107 @@
-<a href="https://discord.gg/wRCgB7vBQv">
-    <img src="https://img.shields.io/discord/811542332678996008?color=7289DA&label=Support&logo=discord&style=for-the-badge" alt="Discord">
-</a>
+# Vocard Homelab Fork
 
-# Vocard Bot
-Vocard is a highly customizable Discord music bot, designed to deliver a user-friendly experience. It offers support for a wide range of streaming platforms including Youtube, Soundcloud, Spotify, Twitch, and more.
+This fork keeps the upstream Vocard bot baseline and packages it for a small single-guild homelab deployment. It is designed for one Discord server, Docker Compose, no dashboard container, no public MongoDB/Lavalink ports, and environment-driven secrets.
 
-## Features
-* Fast song loading
-* Works with slash and message commands
-* Lightweight design
-* Smooth playback
-* Clean and nice interface
-* Supports many music platforms (YouTube, SoundCloud, Spotify, Apple Music etc.)
-* Built-in playlist support
-* Fully customizable settings
-* Lyrics support
-* Various sound effects
-* Multiple languages available
-* Easy to update
-* Supports docker
-* [One Click Installer](https://github.com/ChocoMeow/Vocard-Installer)
-* [Premium dashboard](https://github.com/ChocoMeow/Vocard-Dashboard)
+## What Runs
 
-## Screenshot
-![features](https://github.com/user-attachments/assets/2a1baf75-d1c8-41d1-a66f-7011e96d5feb)
+The Compose stack starts four services:
 
-## Requirements
-* [Python 3.11+](https://www.python.org/downloads/)
-* [Lavalink Server (Requires 4.0.0+)](https://github.com/freyacodes/Lavalink)
+- `bot`: local Vocard image on `python:3.14.5-slim-bookworm`.
+- `lavalink`: `ghcr.io/lavalink-devs/lavalink:4.2.2`.
+- `spotify-tokener`: pinned `ghcr.io/topi314/spotify-tokener` helper for LavaSrc Spotify token refresh.
+- `mongo`: `mongo:8.2.9-noble` with a named persistent volume.
 
-## Setup
-Please see the [Setup Page](https://docs.vocard.xyz/latest/bot/setup) in the docs to run this bot yourself!
+Lavalink plugins are pinned in `lavalink/application.yml`:
 
-## Need Help?
-Join the [Vocard Support Discord](https://discord.gg/wRCgB7vBQv) for help or questions.
+- `com.github.topi314.lavasrc:lavasrc-plugin:4.8.3`
+- `dev.lavalink.youtube:youtube-plugin:1.18.1`
 
+## Can I Run It Immediately After Clone?
+
+`docker compose up` can be executed from a fresh clone without failing because `.env` is missing, but the bot cannot log in until real credentials are provided. This is intentional: Discord tokens, server IDs, Mongo passwords, Lavalink passwords, and Spotify credentials must not be committed.
+
+For a real run, copy the example env and fill the required values first:
+
+```bash
+cp .env.example .env
+$EDITOR .env
+docker compose up -d --build
+```
+
+The first Lavalink boot may take a few minutes because pinned plugins are downloaded into the `lavalink_plugins` volume. Later starts reuse that volume.
+
+## Required Env Values
+
+Fill these in `.env` before production use:
+
+- `DISCORD_TOKEN`: Discord bot token. Legacy `BOT_TOKEN` and `TOKEN` are still accepted by the bot.
+- `SERVER_ID`: the only Discord guild this bot will serve. Legacy `DISCORD_GUILD_ID` is still accepted.
+- `MONGO_INITDB_ROOT_USERNAME`, `MONGO_INITDB_ROOT_PASSWORD`, `MONGODB_URL`, `MONGODB_NAME`.
+- `LAVALINK_HOST`, `LAVALINK_PORT`, `LAVALINK_PASSWORD`.
+- `LAVASRC_SPOTIFY_CLIENT_ID`, `LAVASRC_SPOTIFY_CLIENT_SECRET`.
+
+`CLIENT_ID` is optional; the bot derives it from Discord after login.
+
+## Spotify Notes
+
+Spotify is handled by LavaSrc, not by a separate ad-hoc container. The Compose-managed `spotify-tokener` service is wired through:
+
+```env
+LAVASRC_SPOTIFY_CUSTOM_TOKEN_ENDPOINT=http://spotify-tokener:8080/api/token
+```
+
+For generated/editorial playlists, set `LAVASRC_SPOTIFY_SP_DC` from your logged-in `open.spotify.com` browser cookie. The bot also switches LavaSrc Spotify API mode at runtime so direct Spotify tracks and Spotify playlists both load correctly.
+
+## Single-Guild Behavior
+
+When `SERVER_ID` is set:
+
+- Messages and interactions outside that guild are ignored.
+- The bot auto-leaves unauthorized guilds on startup and future joins.
+- Slash commands are synced only to the allowed guild.
+- Foreign guild Mongo documents are not deleted; the bot simply stops reading/writing unauthorized guild state.
+
+## Operations
+
+Useful commands:
+
+```bash
+docker compose up -d --build
+docker compose ps
+docker compose logs -f bot
+docker compose logs -f lavalink
+docker compose down
+```
+
+MongoDB and Lavalink plugin jars persist in named volumes:
+
+- `mongo_data`
+- `lavalink_plugins`
+
+To reset all persisted data, explicitly remove volumes:
+
+```bash
+docker compose down -v
+```
+
+## Production Defaults
+
+This fork defaults to homelab-safe operation:
+
+- MongoDB and Lavalink are only reachable on the internal Compose network.
+- Bot logs go to Docker stdout/stderr by default via `LOG_FILE_ENABLE=false`.
+- Lavalink built-in YouTube is disabled; the pinned YouTube plugin handles search.
+- Audio quality is set high with `opusEncodingQuality: 10`, `resamplingQuality: HIGH`, and a larger frame buffer.
+- Upstream update checks are disabled by default with `CHECK_UPSTREAM_UPDATES=false`.
+
+Rotate any token or secret that has been pasted into chat or logs before exposing this bot beyond local testing.
+
+## Local Verification
+
+Run the test suite before changing deployment code:
+
+```bash
+PYENV_VERSION=3.14.3 .venv/bin/pytest -q
+PYENV_VERSION=3.14.3 .venv/bin/python -m compileall function.py main.py voicelink tests
+docker compose config --quiet
+```

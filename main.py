@@ -70,9 +70,30 @@ class Vocard(commands.Bot):
 
         self.ipc_client: IPCClient
 
+    def is_allowed_guild(self, guild_id: int | None) -> bool:
+        return bot_config.is_allowed_guild(guild_id)
+
+    async def leave_unauthorized_guilds(self) -> None:
+        if not bot_config.server_id:
+            return
+
+        for guild in list(self.guilds):
+            if self.is_allowed_guild(guild.id):
+                continue
+            func.logger.warning(
+                "Leaving unauthorized guild %s (%s); expected guild %s.",
+                guild.name,
+                guild.id,
+                bot_config.server_id
+            )
+            await guild.leave()
+
     async def on_message(self, message: discord.Message, /) -> None:
         # Ignore messages from bots or DMs
         if message.author.bot or not message.guild:
+            return False
+
+        if not self.is_allowed_guild(message.guild.id):
             return False
 
         # Check if the bot is directly mentioned
@@ -113,7 +134,7 @@ class Vocard(commands.Bot):
         await self.tree.set_translator(Translator())
 
         # Loading all the module in `cogs` folder
-        for module in os.listdir(func.ROOT_DIR + '/cogs'):
+        for module in os.listdir(func.ROOT_DIR / "cogs"):
             if module.endswith('.py'):
                 try:
                     await self.load_extension(f"cogs.{module[:-3]}")
@@ -128,27 +149,45 @@ class Vocard(commands.Bot):
             except Exception as e:
                 func.logger.error(f"Cannot connected to dashboard! - Reason: {e}")
 
-        # Update version tracking
-        if not bot_config.version or bot_config.version != update.__version__:
+        if bot_config.server_id:
+            guild = discord.Object(id=bot_config.server_id)
+            self.tree.copy_global_to(guild=guild)
+            await self.tree.sync(guild=guild)
+        elif not bot_config.version or bot_config.version != update.__version__:
             await self.tree.sync()
+
+        if func.settings_override_exists() and (not bot_config.version or bot_config.version != update.__version__):
             func.update_json("settings.json", new_data={"version": update.__version__})
-            
-            for locale_key, values in self.tree.translator.MISSING_TRANSLATOR.items():
-                func.logger.warning(f'Missing translation for "{", ".join(values)}" in "{locale_key}"')
-            self.tree.translator.MISSING_TRANSLATOR.clear()
+
+        for locale_key, values in self.tree.translator.MISSING_TRANSLATOR.items():
+            func.logger.warning(f'Missing translation for "{", ".join(values)}" in "{locale_key}"')
+        self.tree.translator.MISSING_TRANSLATOR.clear()
 
     async def on_ready(self):
         func.logger.info("------------------")
         func.logger.info(f"Logging As {self.user}")
         func.logger.info(f"Bot ID: {self.user.id}")
         func.logger.info("------------------")
-        func.logger.info(f"Vocard Version: {update.__version__}")
+        func.logger.info(f"{bot_config.bot_name} Version: {update.__version__}")
         func.logger.info(f"Discord Version: {discord.__version__}")
         func.logger.info(f"Python Version: {sys.version}")
         func.logger.info("------------------")
 
         bot_config.client_id = self.user.id
         LangHandler._local_langs.clear()
+        await self.leave_unauthorized_guilds()
+
+    async def on_guild_join(self, guild: discord.Guild) -> None:
+        if self.is_allowed_guild(guild.id):
+            return
+
+        func.logger.warning(
+            "Joined unauthorized guild %s (%s); leaving because SERVER_ID is %s.",
+            guild.name,
+            guild.id,
+            bot_config.server_id
+        )
+        await guild.leave()
 
     async def on_command_error(self, ctx: commands.Context, exception, /) -> None:
         error = getattr(exception, 'original', exception)
@@ -189,6 +228,10 @@ class CommandCheck(discord.app_commands.CommandTree):
                 await interaction.response.send_message("This command can only be used in guilds!")
                 return False
 
+            if not bot_config.is_allowed_guild(interaction.guild_id):
+                await interaction.response.send_message("This bot is locked to a different server.", ephemeral=True)
+                return False
+
             channel_perm = interaction.channel.permissions_for(interaction.guild.me)
             if not channel_perm.read_messages or not channel_perm.send_messages:
                 await interaction.response.send_message("I don't have permission to read or send messages in this channel.", ephemeral=True)
@@ -197,13 +240,66 @@ class CommandCheck(discord.app_commands.CommandTree):
         return True
 
 async def get_prefix(bot: commands.Bot, message: discord.Message) -> str:
+    if not bot_config.is_allowed_guild(message.guild.id):
+        return ""
     settings = await MongoDBHandler.get_settings(message.guild.id)
     prefix = settings.get("prefix", bot_config.bot_prefix)
     return prefix if prefix is not None else ""
 
 # Loading settings and logger
-bot_config = Config(func.open_json("settings.json"))
+bot_config = Config(func.load_settings())
 Lang_handler = LangHandler.init()
+
+def _has_value(value) -> bool:
+    return value not in (None, "", 0, "0")
+
+def _env_enabled(*names: str, default: bool = True) -> bool:
+    for name in names:
+        value = os.getenv(name)
+        if value in (None, ""):
+            continue
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return default
+
+def _first_env(*names: str) -> str | None:
+    for name in names:
+        value = os.getenv(name)
+        if value not in (None, ""):
+            return value
+    return None
+
+def validate_runtime_config(config: Config) -> None:
+    missing: list[str] = []
+
+    if not _has_value(config.token):
+        missing.append("DISCORD_TOKEN (or legacy BOT_TOKEN/TOKEN)")
+    if not _has_value(config.server_id):
+        missing.append("SERVER_ID (or legacy DISCORD_GUILD_ID)")
+    if not _has_value(config.mongodb_url):
+        missing.append("MONGODB_URL")
+    if not _has_value(config.mongodb_name):
+        missing.append("MONGODB_NAME")
+
+    node = config.nodes.get("DEFAULT", {})
+    if not _has_value(node.get("host")):
+        missing.append("LAVALINK_HOST")
+    if not _has_value(node.get("port")):
+        missing.append("LAVALINK_PORT")
+    if not _has_value(node.get("password")):
+        missing.append("LAVALINK_PASSWORD")
+
+    if _env_enabled("LAVASRC_SPOTIFY_ENABLED", "SPOTIFY_ENABLED", default=True):
+        if not _first_env("LAVASRC_SPOTIFY_CLIENT_ID", "SPOTIFY_CLIENT_ID"):
+            missing.append("LAVASRC_SPOTIFY_CLIENT_ID")
+        if not _first_env("LAVASRC_SPOTIFY_CLIENT_SECRET", "SPOTIFY_CLIENT_SECRET"):
+            missing.append("LAVASRC_SPOTIFY_CLIENT_SECRET")
+
+    if missing:
+        raise RuntimeError(
+            "Missing required configuration: "
+            + ", ".join(missing)
+            + ". Copy .env.example to .env, fill the required values, then run docker compose up -d --build."
+        )
 
 LOG_SETTINGS = bot_config.logging
 if (LOG_FILE := LOG_SETTINGS.get("file", {})).get("enable", True):
@@ -238,5 +334,7 @@ bot = Vocard(
 )
 
 if __name__ == "__main__":
-    update.check_version(with_msg=True)
+    validate_runtime_config(bot_config)
+    if bot_config.check_upstream_updates:
+        update.check_version(with_msg=True)
     bot.run(bot_config.token, root_logger=True)

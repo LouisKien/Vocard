@@ -91,6 +91,10 @@ class MongoDBHandler:
         "inbox": [],
     }
 
+    @staticmethod
+    def _is_allowed_settings_guild(guild_id: int) -> bool:
+        return Config().is_allowed_guild(guild_id)
+
     @classmethod
     async def init(cls, uri: str, db_name: str) -> None:
         """
@@ -282,6 +286,8 @@ class MongoDBHandler:
             Dict containing guild settings or empty dict if not found
         """
         try:
+            if not cls._is_allowed_settings_guild(guild_id):
+                return {}
             if guild_id not in cls._settings_buffer:
                 return {}
 
@@ -312,6 +318,8 @@ class MongoDBHandler:
             ConnectionError: If database operation fails
         """
         try:
+            if not cls._is_allowed_settings_guild(guild_id):
+                return {}
             async with cls._lock:
                 # Check if we need fresh data
                 if force_refresh or guild_id not in cls._settings_buffer:
@@ -356,6 +364,8 @@ class MongoDBHandler:
             ConnectionError: If database operation fails
         """
         try:
+            if not cls._is_allowed_settings_guild(guild_id):
+                return False
             settings = await cls.get_settings(guild_id, deep_copy=False)
             result = await cls._update_db(
                 cls._settings_db,

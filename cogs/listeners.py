@@ -66,6 +66,8 @@ class Listeners(commands.Cog):
                 channel = self.bot.get_channel(channel_id)
                 if not channel:
                     continue
+                if not Config().is_allowed_guild(channel.guild.id):
+                    continue
                 elif not any(False if member.bot or member.voice.self_deaf else True for member in channel.members):
                     continue
                     
@@ -150,6 +152,9 @@ class Listeners(commands.Cog):
     @commands.Cog.listener()
     async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
         if member.bot:
+            return
+
+        if not Config().is_allowed_guild(member.guild.id):
             return
         
         if before.channel == after.channel:

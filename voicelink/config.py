@@ -35,7 +35,8 @@ from typing import (
 
 from .enums import SearchType
 
-load_dotenv()
+if os.getenv("VOCARD_SKIP_DOTENV", "").lower() not in {"1", "true", "yes", "on"}:
+    load_dotenv()
 
 class Config:
     _instance: Optional['Config'] = None
@@ -74,9 +75,18 @@ class Config:
             return
             
         settings = settings or {}
-        
-        self.token: str = settings.get("token") or os.getenv("TOKEN")
-        self.client_id: int = int(settings.get("client_id", 0)) or int(os.getenv("CLIENT_ID"))
+
+        self.token: str = settings.get("token") or os.getenv("DISCORD_TOKEN") or os.getenv("BOT_TOKEN") or os.getenv("TOKEN")
+        self.bot_name: str = settings.get("bot_name") or os.getenv("BOT_NAME") or "Vocard"
+
+        client_id = settings.get("client_id")
+        env_client_id = os.getenv("CLIENT_ID")
+        self.client_id: int = int(client_id) if client_id not in (None, "", 0, "0") else int(env_client_id) if env_client_id else 0
+
+        server_id = settings.get("server_id")
+        env_server_id = os.getenv("SERVER_ID") or os.getenv("DISCORD_GUILD_ID")
+        self.server_id: int = int(server_id) if server_id not in (None, "", 0, "0") else int(env_server_id) if env_server_id else 0
+
         self.genius_token: str = settings.get("genius_token") or os.getenv("GENIUS_TOKEN")
         self.mongodb_url: str = settings.get("mongodb_url") or os.getenv("MONGODB_URL")
         self.mongodb_name: str = settings.get("mongodb_name") or os.getenv("MONGODB_NAME")
@@ -100,8 +110,14 @@ class Config:
         self.playlist_settings: Dict[str, Union[str, int]] = settings.get("playlist_settings", {})
         self.timer_settings: Dict[str, int] = settings.get("timer_settings", {})
         self.version: str = settings.get("version", "")
+        self.check_upstream_updates: bool = bool(settings.get("check_upstream_updates", False))
         
         self.initialized = True
+
+    def is_allowed_guild(self, guild_id: Optional[int]) -> bool:
+        if not self.server_id:
+            return True
+        return guild_id == self.server_id
     
     @classmethod
     def get_source_config(cls, source: str, type: str) -> Union[str, None]:

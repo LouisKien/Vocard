@@ -59,6 +59,9 @@ if TYPE_CHECKING:
 URL_REGEX = re.compile(
     r"https?://(?:www\.)?.+"
 )
+SPOTIFY_URL_REGEX = re.compile(
+    r"https?://open\.spotify\.com/(?P<kind>track|playlist|album|artist)/(?P<id>[A-Za-z0-9]+)"
+)
 
 NODE_VERSION = "v4"
 
@@ -114,6 +117,8 @@ class Node:
 
         self._players: Dict[int, Player] = {}
         self._info: Optional[NodeInfo] = None
+        self._lavasrc_spotify_partner_api: Optional[bool] = None
+        self._lavasrc_spotify_config_lock = asyncio.Lock()
         
         self.yt_ratelimit: Optional[YTRatelimit] = STRATEGY.get(yt_ratelimit.get("strategy"))(self, yt_ratelimit) if yt_ratelimit and yt_ratelimit.get("tokens") else None
 
@@ -350,6 +355,61 @@ class Node:
         data = await self.send(RequestMethod.GET, f"decodetrack?encodedTrack={identifier}")
         return Track(track_id=identifier, info=data, requester=requester)
 
+    @staticmethod
+    def _merge_track_data(track: dict[str, Any]) -> dict[str, Any]:
+        info = dict(track.get("info", {}))
+        plugin_info = track.get("pluginInfo") or {}
+        if plugin_info:
+            info.update(plugin_info)
+            info["pluginInfo"] = plugin_info
+        return info
+
+    @staticmethod
+    def _build_playlist_info(data: dict[str, Any]) -> dict[str, Any]:
+        info = dict(data.get("info", {}))
+        plugin_info = data.get("pluginInfo") or {}
+        if plugin_info:
+            info.update(plugin_info)
+            info["pluginInfo"] = plugin_info
+        return info
+
+    @staticmethod
+    def _spotify_partner_api_for_query(query: str) -> Optional[bool]:
+        match = SPOTIFY_URL_REGEX.match(query)
+        if not match:
+            return None
+
+        kind = match.group("kind")
+        if kind == "track":
+            return False
+        if kind == "playlist":
+            return True
+        return None
+
+    async def _set_lavasrc_spotify_partner_api(self, enabled: bool) -> None:
+        async with self._lavasrc_spotify_config_lock:
+            if self._lavasrc_spotify_partner_api is enabled:
+                return
+
+            uri = f"{self._rest_uri}/{NODE_VERSION}/lavasrc/config"
+            payload = {
+                "spotify": {
+                    "preferPartnerApi": enabled,
+                    "preferV1SearchApi": True,
+                }
+            }
+            async with self._session.request(
+                method="PATCH",
+                url=uri,
+                headers={"Authorization": self._password},
+                json=payload,
+            ) as resp:
+                if resp.status >= 300:
+                    body = await resp.text()
+                    raise NodeException(f"Unable to update LavaSrc Spotify config: {body}")
+
+            self._lavasrc_spotify_partner_api = enabled
+
     async def get_tracks(
         self,
         query: str,
@@ -369,6 +429,10 @@ class Node:
         if not URL_REGEX.match(query) and ':' not in query:
             query = f"{search_type}:{query}"
 
+        prefer_partner_api = self._spotify_partner_api_for_query(query)
+        if prefer_partner_api is not None:
+            await self._set_lavasrc_spotify_partner_api(prefer_partner_api)
+
         response: dict[str, Any] = await self.send(RequestMethod.GET, f"loadtracks?identifier={quote(query)}")
         data = response.get("data")
         load_type = response.get("loadType")
@@ -383,13 +447,21 @@ class Node:
             raise TrackLoadError(f"{data['message']} [{data['severity']}]")
 
         elif load_type in ("playlist", "recommendations"):
-            return Playlist(playlist_info=data["info"], tracks=data["tracks"], requester=requester)
+            playlist_tracks = [
+                {"encoded": track["encoded"], "info": self._merge_track_data(track)}
+                for track in data["tracks"]
+            ]
+            return Playlist(
+                playlist_info=self._build_playlist_info(data),
+                tracks=playlist_tracks,
+                requester=requester
+            )
 
         elif load_type == "search":
-            return [Track(track_id=track["encoded"], info=track["info"], requester=requester) for track in data]
+            return [Track(track_id=track["encoded"], info=self._merge_track_data(track), requester=requester) for track in data]
 
         elif load_type == "track":
-            return [Track(track_id=data["encoded"], info=data["info"], requester=requester)]
+            return [Track(track_id=data["encoded"], info=self._merge_track_data(data), requester=requester)]
     
     async def update_refresh_yt_access_token(self, token: YTToken) -> dict:
         if not self._available:

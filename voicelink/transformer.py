@@ -176,11 +176,18 @@ def decode_lavasrc_fields(reader: DataReader) -> Mapping[str, Any]:
     is_preview = reader.read_boolean()
 
     return {
+        'albumName': album_name,
         'album_name': album_name,
+        'albumUrl': album_url,
         'album_url': album_url,
+        'artistUrl': artist_url,
         'artist_url': artist_url,
+        'artistArtworkUrl': artist_artwork_url,
         'artist_artwork_url': artist_artwork_url,
+        'artistArtUrl': artist_artwork_url,
+        'previewUrl': preview_url,
         'preview_url': preview_url,
+        'isPreview': is_preview,
         'is_preview': is_preview
     }
 
@@ -276,6 +283,7 @@ def decode(
 
     if version == 3:
         extra_fields['artworkUrl'] = reader.read_nullable_utf()
+        extra_fields['albumArtUrl'] = extra_fields['artworkUrl']
         extra_fields['isrc'] = reader.read_nullable_utf()
 
     source = reader.read_utf().decode()
@@ -296,7 +304,8 @@ def decode(
         'isSeekable': not is_stream,
         'sourceName': source,
         'position': position,
-        **extra_fields
+        **extra_fields,
+        **source_specific_fields
     }
 
 def encode(
