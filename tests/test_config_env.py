@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PYTHON = ROOT / ".venv" / "bin" / "python"
+PYTHON = Path(sys.executable)
 BASE_ENV_KEYS = (
     "HOME",
     "LANG",
@@ -26,7 +26,11 @@ BASE_ENV_KEYS = (
 
 def base_env(**overrides: str) -> dict[str, str]:
     env = {key: os.environ[key] for key in BASE_ENV_KEYS if key in os.environ}
-    env.update({"PYENV_VERSION": "3.14.3", "VOCARD_SKIP_DOTENV": "true"})
+    env.update({
+        "PYENV_VERSION": "3.14.3",
+        "VOCARD_SKIP_DOTENV": "true",
+        "VOCARD_IGNORE_SETTINGS_JSON": "true",
+    })
     env.update(overrides)
     return env
 
@@ -242,6 +246,16 @@ def test_youtube_source_has_current_playback_fallback_client() -> None:
     assert "TVHTML5EMBEDDED" not in application_yml
 
 
+def test_mongo_image_supports_non_avx_homelab_cpu() -> None:
+    compose_yml = (ROOT / "docker-compose.yml").read_text(encoding="utf8")
+    env_example = (ROOT / ".env.example").read_text(encoding="utf8")
+
+    assert "image: ${MONGO_IMAGE:-mongo:4.4.29-focal}" in compose_yml
+    assert "MONGO_IMAGE=mongo:4.4.29-focal" in env_example
+    assert "mongo admin" in compose_yml
+    assert "mongosh" not in compose_yml
+
+
 def test_main_uses_path_safe_cog_loading() -> None:
     main_py = (ROOT / "main.py").read_text(encoding="utf8")
 
@@ -261,6 +275,7 @@ def test_env_example_contains_homelab_contract() -> None:
         "COMPOSE_PROJECT_NAME",
         "DISCORD_TOKEN",
         "SERVER_ID",
+        "MONGO_IMAGE",
         "MONGO_INITDB_ROOT_USERNAME",
         "MONGO_INITDB_ROOT_PASSWORD",
         "MONGODB_URL",

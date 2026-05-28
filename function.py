@@ -66,7 +66,7 @@ def update_json(path: str, new_data: dict) -> None:
         json.dump(data, json_file, indent=4)
 
 def settings_override_exists() -> bool:
-    return SETTINGS_FILE.exists()
+    return SETTINGS_FILE.exists() and _get_env("VOCARD_IGNORE_SETTINGS_JSON") not in {"1", "true", "yes", "on"}
 
 def _get_env(name: str) -> Optional[str]:
     if name not in os.environ:
@@ -126,7 +126,7 @@ def _apply_env_override(
         _set_nested(settings, path, value)
 
 def load_settings() -> dict[str, Any]:
-    source = SETTINGS_FILE if SETTINGS_FILE.exists() else DEFAULT_SETTINGS_FILE
+    source = SETTINGS_FILE if settings_override_exists() else DEFAULT_SETTINGS_FILE
     settings = copy.deepcopy(open_json(str(source)))
 
     token = _get_first_env("DISCORD_TOKEN", "BOT_TOKEN", "TOKEN")

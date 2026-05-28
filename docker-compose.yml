@@ -6,7 +6,8 @@ x-vocard-env: &vocard-env
 
 services:
   mongo:
-    image: mongo:8.2.9-noble
+    # MongoDB 5+ requires AVX on x86_64. Keep 4.4 pinned for Intel N4100/non-AVX homelabs.
+    image: ${MONGO_IMAGE:-mongo:4.4.29-focal}
     restart: unless-stopped
     init: true
     env_file: *vocard-env
@@ -20,7 +21,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "if [ -n \"$${MONGO_INITDB_ROOT_USERNAME}\" ] && [ -n \"$${MONGO_INITDB_ROOT_PASSWORD}\" ]; then mongosh \"mongodb://$${MONGO_INITDB_ROOT_USERNAME}:$${MONGO_INITDB_ROOT_PASSWORD}@localhost:27017/admin\" --quiet --eval \"db.adminCommand('ping').ok\" | grep 1; else mongosh --quiet --eval \"db.adminCommand('ping').ok\" | grep 1; fi"
+          "if [ -n \"$${MONGO_INITDB_ROOT_USERNAME}\" ] && [ -n \"$${MONGO_INITDB_ROOT_PASSWORD}\" ]; then mongo admin -u \"$${MONGO_INITDB_ROOT_USERNAME}\" -p \"$${MONGO_INITDB_ROOT_PASSWORD}\" --authenticationDatabase admin --quiet --eval \"db.adminCommand('ping').ok\" | grep 1; else mongo admin --quiet --eval \"db.adminCommand('ping').ok\" | grep 1; fi"
         ]
       interval: 10s
       timeout: 5s

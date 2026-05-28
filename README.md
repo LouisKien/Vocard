@@ -9,7 +9,7 @@ The Compose stack starts four services:
 - `bot`: local Vocard image on `python:3.14.5-slim-bookworm`.
 - `lavalink`: `ghcr.io/lavalink-devs/lavalink:4.2.2`.
 - `spotify-tokener`: pinned `ghcr.io/topi314/spotify-tokener` helper for LavaSrc Spotify token refresh.
-- `mongo`: `mongo:8.2.9-noble` with a named persistent volume.
+- `mongo`: `mongo:4.4.29-focal` with a named persistent volume.
 
 Lavalink plugins are pinned in `lavalink/application.yml`:
 
@@ -36,6 +36,7 @@ Fill these in `.env` before production use:
 
 - `DISCORD_TOKEN`: Discord bot token. Legacy `BOT_TOKEN` and `TOKEN` are still accepted by the bot.
 - `SERVER_ID`: the only Discord guild this bot will serve. Legacy `DISCORD_GUILD_ID` is still accepted.
+- `MONGO_IMAGE`: defaults to `mongo:4.4.29-focal` for Intel N4100 and other non-AVX CPUs.
 - `MONGO_INITDB_ROOT_USERNAME`, `MONGO_INITDB_ROOT_PASSWORD`, `MONGODB_URL`, `MONGODB_NAME`.
 - `LAVALINK_HOST`, `LAVALINK_PORT`, `LAVALINK_PASSWORD`.
 - `LAVASRC_SPOTIFY_CLIENT_ID`, `LAVASRC_SPOTIFY_CLIENT_SECRET`.
@@ -88,6 +89,7 @@ docker compose down -v
 
 This fork defaults to homelab-safe operation:
 
+- MongoDB is pinned to 4.4 because MongoDB 5+ requires AVX on x86_64 and will not start on Intel N4100-class CPUs.
 - MongoDB and Lavalink are only reachable on the internal Compose network.
 - Bot logs go to Docker stdout/stderr by default via `LOG_FILE_ENABLE=false`.
 - Lavalink built-in YouTube is disabled; the pinned YouTube plugin handles search.
