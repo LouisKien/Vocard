@@ -535,6 +535,12 @@ class Player(VoiceProtocol):
         self._start_background_task(self._persist_teardown_state(played_time), "teardown_persist")
         try:
             await self._clear_voice_status_for_channel(voice_channel)
+        except errors.Forbidden:
+            if self._logger:
+                self._logger.debug(
+                    "Skipped clearing voice status during teardown for guild %s due to missing permissions or disconnect timing.",
+                    self.guild.id if self.guild else "unknown",
+                )
         except Exception as error:
             if self._logger:
                 self._logger.warning(

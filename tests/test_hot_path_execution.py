@@ -294,6 +294,55 @@ def test_teardown_clears_voice_status_before_destroy() -> None:
     assert order[-1] == "destroy"
 
 
+def test_teardown_suppresses_forbidden_voice_status_warning_noise(monkeypatch) -> None:
+    debug_messages: list[str] = []
+    warning_messages: list[str] = []
+    order: list[str] = []
+
+    class _FakeForbidden(Exception):
+        pass
+
+    monkeypatch.setattr("voicelink.player.errors.Forbidden", _FakeForbidden)
+
+    async def fake_clear_voice_status(_channel):
+        raise _FakeForbidden()
+
+    async def fake_destroy():
+        order.append("destroy")
+
+    logger = SimpleNamespace(
+        debug=lambda message, *args, **kwargs: debug_messages.append(message % args if args else message),
+        warning=lambda message, *args, **kwargs: warning_messages.append(message % args if args else message),
+    )
+
+    fake_player = SimpleNamespace(
+        _cancel_inactive_cleanup_timer=lambda: None,
+        _cancel_background_tasks=lambda: None,
+        controller=None,
+        settings={"played_time": 0, "music_request_channel": {}},
+        build_embed=lambda current=None: None,
+        joinTime=0,
+        _start_background_task=lambda coro, label: order.append(f"bg:{label}"),
+        _persist_teardown_state=lambda played_time: None,
+        _clear_voice_status_for_channel=fake_clear_voice_status,
+        _cleanup_controller_message=lambda controller, **kwargs: None,
+        is_ipc_connected=False,
+        destroy=fake_destroy,
+        channel=SimpleNamespace(id=321),
+        _tearing_down=False,
+        guild=SimpleNamespace(id=123),
+        _logger=logger,
+    )
+
+    asyncio.run(voicelink.Player.teardown(fake_player))
+
+    assert order == ["bg:teardown_persist", "destroy"]
+    assert warning_messages == []
+    assert debug_messages == [
+        "Skipped clearing voice status during teardown for guild 123 due to missing permissions or disconnect timing."
+    ]
+
+
 def test_update_voice_status_is_skipped_while_tearing_down() -> None:
     recorded = {"called": False}
 
