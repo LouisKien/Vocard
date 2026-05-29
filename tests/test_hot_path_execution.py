@@ -312,6 +312,78 @@ def test_update_voice_status_is_skipped_while_tearing_down() -> None:
     assert recorded["called"] is False
 
 
+def test_schedule_post_playback_updates_cancels_pending_voice_status_task() -> None:
+    cancelled = {"called": False}
+    scheduled = []
+
+    class _PendingTask:
+        def done(self) -> bool:
+            return False
+
+        def cancel(self) -> None:
+            cancelled["called"] = True
+
+    fake_player = SimpleNamespace(
+        _voice_status_task=_PendingTask(),
+        _start_background_task=lambda coro, label: scheduled.append(label) or SimpleNamespace(add_done_callback=lambda _cb: None),
+        is_ipc_connected=False,
+        update_voice_status=lambda **kwargs: None,
+        invoke_controller=lambda: None,
+        send_ws=lambda payload: None,
+    )
+
+    voicelink.Player._schedule_post_playback_updates(fake_player, SimpleNamespace(track_id="track-1"))
+
+    assert cancelled["called"] is True
+    assert scheduled == ["controller_side_effect", "voice_status_side_effect"]
+
+
+def test_update_voice_status_uses_track_snapshot_when_current_is_already_cleared() -> None:
+    recorded = {"status": "unset"}
+
+    async def fake_edit(*, status=None):
+        recorded["status"] = status
+
+    class _FakePlaceholder:
+        def __init__(self) -> None:
+            self.variables = {"track_name": lambda: "None"}
+
+        def replace(self, text: str, variables: dict[str, str]) -> str:
+            return variables.get("track_name", "")
+
+    fake_player = SimpleNamespace(
+        _tearing_down=False,
+        settings={"stage_announce_template": "{{@@track_name@@ != 'None' ?? @@track_name@@}}"},
+        channel=SimpleNamespace(type=discord.ChannelType.voice, edit=fake_edit, status=None),
+        current=None,
+        _ph=_FakePlaceholder(),
+        bot=SimpleNamespace(
+            user=SimpleNamespace(
+                id=1,
+                display_name="Vocard",
+                display_avatar=SimpleNamespace(url="https://example.com/avatar.png"),
+            )
+        ),
+        get_msg=lambda key: "LIVE" if key == "common.status.live" else key,
+    )
+
+    snapshot = SimpleNamespace(
+        title="Track Snapshot",
+        uri="https://example.com/track",
+        author="Artist",
+        is_stream=False,
+        length=1234,
+        requester=None,
+        source="youtube",
+        emoji="🎵",
+        thumbnail="https://example.com/thumb.png",
+    )
+
+    asyncio.run(voicelink.Player.update_voice_status(fake_player, track_snapshot=snapshot))
+
+    assert recorded["status"] == "Track Snapshot"
+
+
 def test_single_guild_sync_purges_legacy_global_commands() -> None:
     class _FakeCommandTree:
         def __init__(self) -> None:

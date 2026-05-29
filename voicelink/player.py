@@ -64,6 +64,9 @@ from .utils import format_ms, dispatch_message, TempCtx
 if TYPE_CHECKING:
     from .ipc import IPCClient
 
+_LIVE_TRACK = object()
+
+
 async def connect_channel(ctx: Union[commands.Context, Interaction], channel: VoiceChannel = None):
     texts = await LangHandler.get_lang(ctx.guild.id, "voice.connection.noChannel", "voice.connection.noPermission")
     try:
@@ -158,6 +161,7 @@ class Player(VoiceProtocol):
         self._logger: Optional[logging.Logger] = self._node._logger
         self._inactive_cleanup_task: Optional[asyncio.Task[None]] = None
         self._background_tasks: set[asyncio.Task] = set()
+        self._voice_status_task: Optional[asyncio.Task] = None
         self._tearing_down: bool = False
 
     def __repr__(self):
@@ -677,6 +681,7 @@ class Player(VoiceProtocol):
             if task is current_task or task.done():
                 continue
             task.cancel()
+        self._voice_status_task = None
 
     def _start_background_task(self, coro, label: str) -> Optional[asyncio.Task]:
         if not self.bot or not getattr(self.bot, "loop", None):
@@ -733,7 +738,20 @@ class Player(VoiceProtocol):
 
     def _schedule_post_playback_updates(self, track: Optional[Track]) -> None:
         self._start_background_task(self.invoke_controller(), "controller_side_effect")
-        self._start_background_task(self.update_voice_status(), "voice_status_side_effect")
+        existing_voice_status_task = getattr(self, "_voice_status_task", None)
+        if existing_voice_status_task and not existing_voice_status_task.done():
+            existing_voice_status_task.cancel()
+        voice_status_task = self._start_background_task(
+            self.update_voice_status(track_snapshot=track),
+            "voice_status_side_effect",
+        )
+        if voice_status_task:
+            self._voice_status_task = voice_status_task
+            voice_status_task.add_done_callback(
+                lambda task, player=self: setattr(player, "_voice_status_task", None)
+                if getattr(player, "_voice_status_task", None) is task
+                else None
+            )
         if self.is_ipc_connected:
             self._start_background_task(self.send_ws({
                 "op": "trackUpdate",
@@ -1003,15 +1021,63 @@ class Player(VoiceProtocol):
             return True
         return False
     
-    async def update_voice_status(self, remove_status: bool = False) -> None:
+    def _build_track_placeholder_values(self, track: Optional[Track]) -> Dict[str, Any]:
+        bot_user = getattr(self.bot, "user", None)
+        bot_user_id = getattr(bot_user, "id", 0)
+        bot_user_name = getattr(bot_user, "display_name", getattr(bot_user, "name", "Vocard"))
+        bot_user_avatar = getattr(getattr(bot_user, "display_avatar", None), "url", "")
+        default_color = Config().get_source_config("others", "color") or "0xb3b3b3"
+        no_track_values: Dict[str, Any] = {
+            "track_name": "None",
+            "track_url": "None",
+            "track_author": "None",
+            "track_duration": "None",
+            "track_thumbnail": "https://i.imgur.com/dIFBwU7.png",
+            "track_color": int(default_color, 16),
+            "track_requester_id": str(bot_user_id),
+            "track_requester_name": bot_user_name,
+            "track_requester_mention": f"<@{bot_user_id}>",
+            "track_requester_avatar": bot_user_avatar,
+            "track_source_name": "None",
+            "track_source_emoji": "",
+        }
+        if not track:
+            return no_track_values
+
+        requester = track.requester or bot_user
+        requester_id = getattr(requester, "id", bot_user_id)
+        requester_name = getattr(requester, "name", bot_user_name)
+        requester_avatar = getattr(getattr(requester, "display_avatar", None), "url", bot_user_avatar)
+        track_source = getattr(track, "source", "others") or "others"
+        track_thumbnail = getattr(track, "thumbnail", None) or "https://cdn.discordapp.com/attachments/674788144931012638/823086668445384704/eq-dribbble.gif"
+        track_color = Config().get_source_config(track_source, "color") or default_color
+
+        return {
+            "track_name": track.title,
+            "track_url": track.uri,
+            "track_author": track.author,
+            "track_duration": self.get_msg("common.status.live") if track.is_stream else format_ms(track.length),
+            "track_thumbnail": track_thumbnail,
+            "track_color": int(track_color, 16),
+            "track_requester_id": str(requester_id),
+            "track_requester_name": requester_name,
+            "track_requester_mention": f"<@{requester_id}>",
+            "track_requester_avatar": requester_avatar,
+            "track_source_name": track_source,
+            "track_source_emoji": getattr(track, "emoji", "") or "",
+        }
+
+    async def update_voice_status(self, remove_status: bool = False, *, track_snapshot: Any = _LIVE_TRACK) -> None:
         """Updates the voice status of the channel based on the specified template."""
         if getattr(self, "_tearing_down", False):
             return
-        template = self.settings.get("stage_announce_template", Config().voice_status_template)
+        template = self.settings.get("stage_announce_template") or Config().voice_status_template
         if not template or not self.channel:
             return
         try:
             rv = {key: func() if callable(func) else func for key, func in self._ph.variables.items()}
+            if track_snapshot is not _LIVE_TRACK:
+                rv.update(Player._build_track_placeholder_values(self, track_snapshot))
             status = None if remove_status else self._ph.replace(text=template, variables=rv)
             if getattr(self.channel, "status", None) == status:
                 return
