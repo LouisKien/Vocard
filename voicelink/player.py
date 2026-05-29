@@ -654,35 +654,39 @@ class Player(VoiceProtocol):
         """Adds one or more tracks to the queue."""
         tracks: List[Track] = []
         _duplicate_tracks = [] if self.queue._allow_duplicate and duplicate else [track.uri for track in self.queue._queue]
-        raw_tracks = raw_tracks[0] if isinstance(raw_tracks, List) and len(raw_tracks) == 1 else raw_tracks
+        raw_tracks = raw_tracks[0] if isinstance(raw_tracks, list) and len(raw_tracks) == 1 else raw_tracks
 
-        try:
-            if (is_list := isinstance(raw_tracks, List)):
-                for track in raw_tracks:
-                    if track.uri in _duplicate_tracks:
-                        continue
+        if (is_list := isinstance(raw_tracks, list)):
+            position = -1
+            for track in raw_tracks:
+                if track.uri in _duplicate_tracks:
+                    continue
 
-                    self._validate_time(track, start_time, end_time)
-                    self.queue.put_at_front(track) if at_front else self.queue.put(track)  
-                    tracks.append(track)
-                    _duplicate_tracks.append(track.uri)
-            else:
-                if raw_tracks.uri in _duplicate_tracks:
-                    raise DuplicateTrack(self.get_msg("queue.errors.duplicateTrack"))
-                
-                self._validate_time(raw_tracks, start_time, end_time)
-                position = self.queue.put_at_front(raw_tracks) if at_front else self.queue.put(raw_tracks)
-                tracks.append(raw_tracks)
-                
-        finally:
-            if tracks:
-                if self.channel.members and len([m for m in self.channel.members if not m.bot]) > 0:
-                    self._cancel_inactive_cleanup_timer()
-                if self.is_ipc_connected:
-                    await self.send_ws({"op": "addTrack", "tracks": [track.track_id for track in tracks], "position": -1 if is_list else position}, tracks[0].requester)
+                self._validate_time(track, start_time, end_time)
+                self.queue.put_at_front(track) if at_front else self.queue.put(track)
+                tracks.append(track)
+                _duplicate_tracks.append(track.uri)
+        else:
+            if raw_tracks.uri in _duplicate_tracks:
+                raise DuplicateTrack(self.get_msg("queue.errors.duplicateTrack"))
 
-                self._logger.debug(f"Player in {self.guild.name}({self.guild.id}) has been added {len(tracks)} tracks into the queue.")
-                return len(tracks) if is_list else position
+            self._validate_time(raw_tracks, start_time, end_time)
+            position = self.queue.put_at_front(raw_tracks) if at_front else self.queue.put(raw_tracks)
+            tracks.append(raw_tracks)
+
+        if not tracks:
+            return 0
+
+        if self.channel.members and any(not member.bot for member in self.channel.members):
+            self._cancel_inactive_cleanup_timer()
+        if self.is_ipc_connected:
+            await self.send_ws(
+                {"op": "addTrack", "tracks": [track.track_id for track in tracks], "position": position},
+                tracks[0].requester
+            )
+
+        self._logger.debug(f"Player in {self.guild.name}({self.guild.id}) has been added {len(tracks)} tracks into the queue.")
+        return len(tracks) if is_list else position
     
     async def remove_track(self, index: int, index2: int = None, remove_target: Member = None, requester: Member = None) -> Dict[int, Track]:
         """Removes one or more tracks from the queue."""

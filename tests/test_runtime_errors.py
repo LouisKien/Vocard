@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 from pathlib import Path
 
@@ -27,6 +28,19 @@ Client [WEB_EMBEDDED_PLAYER] failed: Video player configuration errorVideo playe
     assert "Client [" not in message
     assert "at dev.lavalink" not in message
     assert "Không thể phát bài này" in message
+
+
+def test_player_add_track_does_not_return_from_finally() -> None:
+    player_source = (ROOT / "voicelink" / "player.py").read_text(encoding="utf8")
+    module = ast.parse(player_source)
+    add_track = next(
+        node
+        for node in ast.walk(module)
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "add_track"
+    )
+
+    for try_node in (node for node in ast.walk(add_track) if isinstance(node, ast.Try)):
+        assert not any(isinstance(node, ast.Return) for node in ast.walk(ast.Module(body=try_node.finalbody, type_ignores=[])))
 
 
 def test_default_language_is_vietnamese() -> None:
