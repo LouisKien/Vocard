@@ -103,9 +103,10 @@ class _FakeFallbackPlayer(_FakeFastPathPlayer):
 
 
 class _FakeResponse:
-    def __init__(self, status: int, payload):
+    def __init__(self, status: int, payload, *, headers=None):
         self.status = status
         self._payload = payload
+        self.headers = headers or {}
 
     async def __aenter__(self):
         return self
@@ -375,3 +376,36 @@ def test_fastpath_uses_client_credentials_when_custom_token_endpoint_is_missing(
     assert seed is not None
     assert session.calls[0]["url"] == "https://accounts.spotify.com/api/token"
     assert session.calls[1]["headers"]["Authorization"] == "Bearer client-token"
+
+
+def test_fastpath_rate_limit_enters_cooldown_and_stops_retrying(monkeypatch) -> None:
+    monkeypatch.setenv("SPOTIFY_FAST_PLAYLIST_START", "true")
+    monkeypatch.setenv("LAVASRC_SPOTIFY_CLIENT_ID", "client-id")
+    monkeypatch.setenv("LAVASRC_SPOTIFY_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("LAVASRC_SPOTIFY_CUSTOM_TOKEN_ENDPOINT", "http://spotify-tokener:8080/api/token")
+
+    session = _FakeSession(
+        [
+            _FakeResponse(
+                200,
+                {
+                    "accessToken": "anon-token",
+                    "accessTokenExpirationTimestampMs": str(9_999_999_999_999),
+                },
+            ),
+            _FakeResponse(429, "Too many requests", headers={"Retry-After": "120"}),
+        ]
+    )
+
+    client = SpotifyFastPathClient(session)
+
+    first = asyncio.run(
+        client.get_playlist_seed("https://open.spotify.com/playlist/37i9dQZF1DWVOaOWiVD1Lf?si=abc")
+    )
+    second = asyncio.run(
+        client.get_playlist_seed("https://open.spotify.com/playlist/37i9dQZF1DWVOaOWiVD1Lf?si=abc")
+    )
+
+    assert first is None
+    assert second is None
+    assert len(session.calls) == 2

@@ -56,6 +56,14 @@ def spotify_custom_token_endpoint() -> Optional[str]:
     return _first_env("LAVASRC_SPOTIFY_CUSTOM_TOKEN_ENDPOINT", "SPOTIFY_CUSTOM_TOKEN_ENDPOINT")
 
 
+def spotify_fast_playlist_backoff_seconds() -> int:
+    raw_value = _first_env("SPOTIFY_FAST_PLAYLIST_BACKOFF_SECONDS", default="300")
+    try:
+        return max(int(raw_value or 300), 30)
+    except (TypeError, ValueError):
+        return 300
+
+
 def extract_first_spotify_track_url(payload: dict[str, Any]) -> Optional[str]:
     tracks = payload.get("tracks", {})
     for item in tracks.get("items", []):
@@ -127,7 +135,26 @@ class SpotifyFastPathClient:
         self._logger = logger
         self._token: Optional[str] = None
         self._token_expires_at: float = 0
+        self._rate_limited_until: float = 0
         self._lock = asyncio.Lock()
+
+    @staticmethod
+    def _parse_retry_after(headers: dict[str, Any]) -> int:
+        retry_after = headers.get("Retry-After") if headers else None
+        try:
+            return max(int(float(retry_after)), 1)
+        except (TypeError, ValueError):
+            return spotify_fast_playlist_backoff_seconds()
+
+    def _activate_rate_limit_cooldown(self, headers: Optional[dict[str, Any]], *, reason: str) -> None:
+        delay = self._parse_retry_after(headers or {})
+        self._rate_limited_until = max(self._rate_limited_until, time.time() + delay)
+        if self._logger:
+            self._logger.warning(
+                "Spotify fast-path disabled for %ss after rate limit: %s",
+                delay,
+                reason,
+            )
 
     async def _get_custom_access_token(self) -> Optional[str]:
         endpoint = spotify_custom_token_endpoint()
@@ -135,6 +162,10 @@ class SpotifyFastPathClient:
             return None
 
         async with self._session.request(method="GET", url=endpoint) as resp:
+            if resp.status == 429:
+                body = await resp.text()
+                self._activate_rate_limit_cooldown(resp.headers, reason=f"custom token endpoint: {body}")
+                return None
             if resp.status >= 300:
                 body = await resp.text()
                 raise RuntimeError(f"Spotify custom token request failed: {body}")
@@ -155,10 +186,14 @@ class SpotifyFastPathClient:
     async def _get_access_token(self) -> Optional[str]:
         if not spotify_fast_playlist_enabled():
             return None
+        if time.time() < self._rate_limited_until:
+            return None
         if self._token and time.time() < self._token_expires_at:
             return self._token
 
         async with self._lock:
+            if time.time() < self._rate_limited_until:
+                return None
             if self._token and time.time() < self._token_expires_at:
                 return self._token
 
@@ -178,6 +213,10 @@ class SpotifyFastPathClient:
                 headers={"Authorization": f"Basic {basic_auth}"},
                 data={"grant_type": "client_credentials"},
             ) as resp:
+                if resp.status == 429:
+                    body = await resp.text()
+                    self._activate_rate_limit_cooldown(resp.headers, reason=f"client credentials token: {body}")
+                    return None
                 if resp.status >= 300:
                     body = await resp.text()
                     raise RuntimeError(f"Spotify token request failed: {body}")
@@ -190,6 +229,8 @@ class SpotifyFastPathClient:
     async def get_playlist_seed(self, query: str) -> Optional[SpotifyPlaylistSeed]:
         playlist_id = spotify_playlist_id_from_query(query)
         if not playlist_id or not spotify_fast_playlist_enabled():
+            return None
+        if time.time() < self._rate_limited_until:
             return None
 
         token = await self._get_access_token()
@@ -206,6 +247,10 @@ class SpotifyFastPathClient:
             headers={"Authorization": f"Bearer {token}"},
             params={"fields": fields, "market": spotify_country_code()},
         ) as resp:
+            if resp.status == 429:
+                body = await resp.text()
+                self._activate_rate_limit_cooldown(resp.headers, reason=f"playlist seed request: {body}")
+                return None
             if resp.status >= 300:
                 body = await resp.text()
                 raise RuntimeError(f"Spotify playlist seed request failed: {body}")
