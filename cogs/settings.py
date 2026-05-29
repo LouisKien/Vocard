@@ -197,10 +197,13 @@ class Settings(commands.Cog, name="settings"):
         "Set the player's volume."
         player: voicelink.Player = ctx.guild.voice_client
         if player:
+            player.bind_controller_context(ctx)
             await player.set_volume(value, ctx.author)
 
         await MongoDBHandler.update_settings(ctx.guild.id, {"$set": {'volume': value}})
         await send_localized_message(ctx, 'settings.actions.volumeSet', value)
+        if player:
+            await player.refresh_controller_for_state_change(ctx)
 
     @settings.command(name="togglecontroller", aliases=get_aliases("togglecontroller"))
     @commands.has_permissions(manage_guild=True)

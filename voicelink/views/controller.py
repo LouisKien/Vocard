@@ -170,7 +170,8 @@ class PlayPause(ControlButton):
 
         self.change_states(self.playing_status(self.player))
         await self.player.set_pause(is_paused, interaction.user)
-        await interaction.response.edit_message(view=self.view)
+        await interaction.response.defer()
+        await self.player.refresh_controller_for_state_change(interaction)
 
 class Skip(ControlButton):
     def __init__(self, **kwargs):
@@ -251,8 +252,8 @@ class Loop(ControlButton):
 
         await self.player.set_repeat(requester=interaction.user)
         self.change_states(self.player.queue._repeat.peek_next().name)
-
-        await interaction.response.edit_message(view=self.view)
+        await interaction.response.defer()
+        await self.player.refresh_controller_for_state_change(interaction)
         
 class VolumeUp(ControlButton):
     def __init__(self, **kwargs):
@@ -266,6 +267,7 @@ class VolumeUp(ControlButton):
         await self.player.set_volume(value, interaction.user)
 
         await self.send(interaction, 'settings.actions.volumeSet', value, ephemeral=True)
+        await self.player.refresh_controller_for_state_change(interaction)
 
 class VolumeDown(ControlButton):
     def __init__(self, **kwargs):
@@ -279,6 +281,7 @@ class VolumeDown(ControlButton):
         await self.player.set_volume(value, interaction.user)
 
         await self.send(interaction, 'settings.actions.volumeSet', value, ephemeral=True)
+        await self.player.refresh_controller_for_state_change(interaction)
 
 class VolumeMute(ControlButton):
     def __init__(self, **kwargs):
@@ -295,7 +298,8 @@ class VolumeMute(ControlButton):
         value = 0 if is_muted else self.player.settings.get("volume", 100)
         self.change_states("muted" if value else "mute")
         await self.player.set_volume(value, interaction.user)
-        await interaction.response.edit_message(view=self.view)
+        await interaction.response.defer()
+        await self.player.refresh_controller_for_state_change(interaction)
 
 class AutoPlay(ControlButton):
     def __init__(self, **kwargs):
@@ -329,6 +333,7 @@ class Shuffle(ControlButton):
         
         await self.player.shuffle("queue", interaction.user)
         await self.send(interaction, 'player.controls.shuffle.success')
+        await self.player.refresh_controller_for_state_change(interaction)
 
 class Forward(ControlButton):
     def __init__(self, **kwargs):

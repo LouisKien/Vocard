@@ -119,8 +119,18 @@ class Basic(commands.Cog):
             await self._dismiss_temporary_message(loading_message)
 
     @staticmethod
-    async def _refresh_controller_after_queue_add(player: voicelink.Player) -> None:
-        await player.refresh_controller_after_queue_update()
+    async def _refresh_controller_after_queue_add(
+        player: voicelink.Player,
+        ctx: commands.Context | discord.Interaction,
+    ) -> None:
+        await player.refresh_controller_after_queue_update(ctx)
+
+    @staticmethod
+    async def _refresh_controller_after_state_change(
+        player: voicelink.Player,
+        ctx: commands.Context | discord.Interaction,
+    ) -> None:
+        await player.refresh_controller_for_state_change(ctx)
 
     async def help_autocomplete(self, interaction: discord.Interaction, current: str) -> list:
         return [app_commands.Choice(name=c.capitalize(), value=c) for c in self.bot.cogs if c not in ["Nodes", "Task"] and current in c]
@@ -182,6 +192,7 @@ class Basic(commands.Cog):
         if not player.is_user_join(ctx.author):
             return await send_localized_message(ctx, "voice.connection.notInChannel", ctx.author.mention, player.channel.mention, ephemeral=True)
         settings = player.settings
+        player.bind_controller_context(ctx)
 
         tracks = await self._get_tracks_with_loading_notice(
             ctx,
@@ -199,7 +210,7 @@ class Basic(commands.Cog):
             if not was_playing:
                 await player.do_next()
             await send_localized_message(ctx, "player.playback.playlistLoad", tracks.name, index, settings=settings)
-            await self._refresh_controller_after_queue_add(player)
+            await self._refresh_controller_after_queue_add(player, ctx)
         else:
             position = await player.add_track(tracks[0], start_time=format_to_ms(start), end_time=format_to_ms(end))
             if not was_playing:
@@ -215,7 +226,7 @@ class Basic(commands.Cog):
                 position if position >= 1 and was_playing else None,
                 settings=settings,
             )
-            await self._refresh_controller_after_queue_add(player)
+            await self._refresh_controller_after_queue_add(player, ctx)
     
     @commands.dynamic_cooldown(cooldown_check, commands.BucketType.guild)
     async def _play(self, interaction: discord.Interaction, message: discord.Message):
@@ -241,6 +252,7 @@ class Basic(commands.Cog):
 
         await interaction.response.defer()
         settings = player.settings
+        player.bind_controller_context(interaction)
         tracks = await self._get_tracks_with_loading_notice(
             interaction,
             player,
@@ -257,7 +269,7 @@ class Basic(commands.Cog):
             if not was_playing:
                 await player.do_next()
             await send_localized_message(interaction, "player.playback.playlistLoad", tracks.name, index, settings=settings)
-            await self._refresh_controller_after_queue_add(player)
+            await self._refresh_controller_after_queue_add(player, interaction)
         else:
             position = await player.add_track(tracks[0])
             if not was_playing:
@@ -274,7 +286,7 @@ class Basic(commands.Cog):
                 position if position >= 1 and was_playing else None,
                 settings=settings,
             )
-            await self._refresh_controller_after_queue_add(player)
+            await self._refresh_controller_after_queue_add(player, interaction)
 
     @commands.hybrid_command(name="search", aliases=get_aliases("search"))
     @app_commands.describe(
@@ -298,6 +310,7 @@ class Basic(commands.Cog):
         if not player.is_user_join(ctx.author):
             return await send_localized_message(ctx, "voice.connection.notInChannel", ctx.author.mention, player.channel.mention, ephemeral=True)
         settings = player.settings
+        player.bind_controller_context(ctx)
 
         if url(query):
             return await send_localized_message(ctx, "search.noLinkSupport", ephemeral=True, settings=settings)
@@ -334,7 +347,7 @@ class Basic(commands.Cog):
             if not was_playing:
                 await player.do_next()
             await dispatch_message(ctx, msg, settings=settings)
-            await self._refresh_controller_after_queue_add(player)
+            await self._refresh_controller_after_queue_add(player, ctx)
 
     @commands.hybrid_command(name="playtop", aliases=get_aliases("playtop"))
     @app_commands.describe(
@@ -356,6 +369,7 @@ class Basic(commands.Cog):
         if not player.is_user_join(ctx.author):
             return await send_localized_message(ctx, "voice.connection.notInChannel", ctx.author.mention, player.channel.mention, ephemeral=True)
         settings = player.settings
+        player.bind_controller_context(ctx)
 
         tracks = await player.get_tracks(query, requester=ctx.author)
         if not tracks:
@@ -367,7 +381,7 @@ class Basic(commands.Cog):
             if not was_playing:
                 await player.do_next()
             await send_localized_message(ctx, "player.playback.playlistLoad", tracks.name, index, settings=settings)
-            await self._refresh_controller_after_queue_add(player)
+            await self._refresh_controller_after_queue_add(player, ctx)
         else:
             position = await player.add_track(tracks[0], start_time=format_to_ms(start), end_time=format_to_ms(end), at_front=True)
             if not was_playing:
@@ -384,7 +398,7 @@ class Basic(commands.Cog):
                 position if position >= 1 and was_playing else None,
                 settings=settings,
             )
-            await self._refresh_controller_after_queue_add(player)
+            await self._refresh_controller_after_queue_add(player, ctx)
 
     @commands.hybrid_command(name="forceplay", aliases=get_aliases("forceplay"))
     @app_commands.describe(
@@ -405,6 +419,7 @@ class Basic(commands.Cog):
         if ctx.interaction:
             await ctx.interaction.response.defer()
         settings = player.settings
+        player.bind_controller_context(ctx)
 
         tracks = await player.get_tracks(query, requester=ctx.author)
         if not tracks:
@@ -422,7 +437,7 @@ class Basic(commands.Cog):
 
         if isinstance(tracks, voicelink.Playlist):
             await send_localized_message(ctx, "player.playback.playlistLoad", tracks.name, index, settings=settings)
-            await self._refresh_controller_after_queue_add(player)
+            await self._refresh_controller_after_queue_add(player, ctx)
         else:
             texts = player.get_msg("common.status.live", "player.playback.trackLoad")
             stream_content = f"`{texts[0]}`" if tracks[0].is_stream else ""
@@ -433,7 +448,7 @@ class Basic(commands.Cog):
                 tracks[0].title, tracks[0].uri, tracks[0].author, tracks[0].formatted_length,
                 settings=settings,
             )
-            await self._refresh_controller_after_queue_add(player)
+            await self._refresh_controller_after_queue_add(player, ctx)
 
     @commands.hybrid_command(name="pause", aliases=get_aliases("pause"))
     @commands.dynamic_cooldown(cooldown_check, commands.BucketType.guild)
@@ -456,7 +471,8 @@ class Basic(commands.Cog):
                 return await send_localized_message(ctx, "player.controls.pause.vote", ctx.author, len(player.pause_votes), required, settings=settings)
 
         await player.set_pause(True, ctx.author)
-        await send_localized_message(ctx, player.controls.pause.success, ctx.author, settings=settings)
+        await send_localized_message(ctx, "player.controls.pause.success", ctx.author, settings=settings)
+        await self._refresh_controller_after_state_change(player, ctx)
 
     @commands.hybrid_command(name="resume", aliases=get_aliases("resume"))
     @commands.dynamic_cooldown(cooldown_check, commands.BucketType.guild)
@@ -480,6 +496,7 @@ class Basic(commands.Cog):
 
         await player.set_pause(False, ctx.author)
         await send_localized_message(ctx, "player.controls.resume.success", ctx.author, settings=settings)
+        await self._refresh_controller_after_state_change(player, ctx)
 
     @commands.hybrid_command(name="skip", aliases=get_aliases("skip"))
     @app_commands.describe(index="Enter a index that you want to skip to.")
@@ -509,6 +526,7 @@ class Basic(commands.Cog):
 
         if index:
             player.queue.skipto(index)
+        player.bind_controller_context(ctx)
 
         if player.queue._repeat.mode == voicelink.LoopType.TRACK:
             await player.set_repeat(voicelink.LoopType.OFF)
@@ -539,11 +557,13 @@ class Basic(commands.Cog):
 
         if not player.is_playing:
             player.queue.backto(index)
+            player.bind_controller_context(ctx)
             await player.do_next()
         else:
             player.queue.backto(index + 1)
             if player.queue._repeat.mode == voicelink.LoopType.TRACK:
                 await player.set_repeat(voicelink.LoopType.OFF)
+            player.bind_controller_context(ctx)
             await player.stop()
 
         await send_localized_message(ctx, "player.controls.back.success", ctx.author, settings=settings)
@@ -649,11 +669,12 @@ class Basic(commands.Cog):
                 return await send_localized_message(ctx, "player.errors.noTrackFound", settings=settings)
 
             was_playing = player.is_playing
+            player.bind_controller_context(ctx)
             index = await player.add_track(tracks)
             if not was_playing:
                 await player.do_next()
             await send_localized_message(ctx, "player.playback.playlistLoad", attachment.filename, index, settings=settings)
-            await self._refresh_controller_after_queue_add(player)
+            await self._refresh_controller_after_queue_add(player, ctx)
         except Exception as e:
             logger.error("error", exc_info=e)
             raise e
@@ -728,6 +749,7 @@ class Basic(commands.Cog):
 
         await player.set_repeat(voicelink.LoopType[mode] if mode in voicelink.LoopType.__members__ else voicelink.LoopType.OFF, ctx.author)
         await send_localized_message(ctx, "player.controls.repeat", mode.capitalize())
+        await self._refresh_controller_after_state_change(player, ctx)
 
     @commands.hybrid_command(name="clear", aliases=get_aliases("clear"))
     @app_commands.describe(queue="Choose a queue that you want to clear.")
@@ -747,6 +769,7 @@ class Basic(commands.Cog):
 
         await player.clear_queue(queue, ctx.author)
         await send_localized_message(ctx, "queue.management.cleared", queue.capitalize())
+        await self._refresh_controller_after_state_change(player, ctx)
 
     @commands.hybrid_command(name="remove", aliases=get_aliases("remove"))
     @app_commands.describe(
@@ -766,6 +789,7 @@ class Basic(commands.Cog):
 
         removed_tracks = await player.remove_track(position1, position2, remove_target=member, requester=ctx.author)
         await send_localized_message(ctx, "queue.management.removed", len(removed_tracks.keys()))
+        await self._refresh_controller_after_state_change(player, ctx)
 
     @commands.hybrid_command(name="forward", aliases=get_aliases("forward"))
     @app_commands.describe(position="Input an amount that you to forward to. Exmaple: 1:20")
@@ -787,6 +811,7 @@ class Basic(commands.Cog):
 
         await player.seek(int(player.position + num))
         await send_localized_message(ctx, "player.controls.forward", format_ms(player.position + num))
+        await self._refresh_controller_after_state_change(player, ctx)
 
     @commands.hybrid_command(name="rewind", aliases=get_aliases("rewind"))
     @app_commands.describe(position="Input an amount that you to rewind to. Exmaple: 1:20")
@@ -808,6 +833,7 @@ class Basic(commands.Cog):
 
         await player.seek(int(player.position - num))
         await send_localized_message(ctx, "player.controls.rewind", format_ms(player.position - num))
+        await self._refresh_controller_after_state_change(player, ctx)
 
     @commands.hybrid_command(name="replay", aliases=get_aliases("replay"))
     @commands.dynamic_cooldown(cooldown_check, commands.BucketType.guild)
@@ -825,6 +851,7 @@ class Basic(commands.Cog):
         
         await player.seek(0)
         await send_localized_message(ctx, "player.controls.replay")
+        await self._refresh_controller_after_state_change(player, ctx)
 
     @commands.hybrid_command(name="shuffle", aliases=get_aliases("shuffle"))
     @commands.dynamic_cooldown(cooldown_check, commands.BucketType.guild)
@@ -844,6 +871,7 @@ class Basic(commands.Cog):
         
         await player.shuffle("queue", ctx.author)
         await send_localized_message(ctx, "player.controls.shuffle.success")
+        await self._refresh_controller_after_state_change(player, ctx)
 
     @commands.hybrid_command(name="swap", aliases=get_aliases("swap"))
     @app_commands.describe(
@@ -862,6 +890,7 @@ class Basic(commands.Cog):
 
         track1, track2 = await player.swap_track(position1, position2, ctx.author)        
         await send_localized_message(ctx, "queue.management.swapped", track1.title, track2.title)
+        await self._refresh_controller_after_state_change(player, ctx)
 
     @commands.hybrid_command(name="move", aliases=get_aliases("move"))
     @app_commands.describe(
@@ -880,6 +909,7 @@ class Basic(commands.Cog):
 
         moved_track = await player.move_track(target, to, ctx.author)
         await send_localized_message(ctx, "queue.management.moved", moved_track, to)
+        await self._refresh_controller_after_state_change(player, ctx)
 
     @commands.hybrid_command(name="lyrics", aliases=get_aliases("lyrics"))
     @app_commands.describe(title="Searches for your query and displays the reutned lyrics.")

@@ -310,6 +310,7 @@ class Playlists(commands.Cog, name="playlist"):
         player: voicelink.Player = ctx.guild.voice_client
         if not player:
             player = await voicelink.connect_channel(ctx)
+        player.bind_controller_context(ctx)
 
         if result['playlist']['type'] == 'link':
             tracks = await search_playlist(result['playlist']['uri'], ctx.author, time_needed=False)
@@ -334,7 +335,7 @@ class Playlists(commands.Cog, name="playlist"):
 
         if not was_playing:
             await player.do_next()
-        await player.refresh_controller_after_queue_update()
+        await player.refresh_controller_after_queue_update(ctx)
 
     @playlist.command(name="view", aliases=get_aliases("view"))
     @commands.dynamic_cooldown(cooldown_check, commands.BucketType.guild)

@@ -163,6 +163,8 @@ class Player(VoiceProtocol):
         self._background_tasks: set[asyncio.Task] = set()
         self._voice_status_task: Optional[asyncio.Task] = None
         self._tearing_down: bool = False
+        self._controller_refresh_pending: bool = False
+        self._controller_refresh_prefer_new_message: bool = False
 
     def __repr__(self):
         return (
@@ -318,6 +320,18 @@ class Player(VoiceProtocol):
         if 'dj' in self.settings and self.settings['dj']:
             return manage_perm or (self.settings['dj'] in [role.id for role in user.roles])
         return self.dj.id == user.id or manage_perm
+
+    def bind_controller_context(self, ctx: Optional[Union[commands.Context, Interaction, TempCtx]]) -> None:
+        """Updates the default text context used for controller refreshes."""
+        if not ctx:
+            return
+
+        channel = getattr(ctx, "channel", None)
+        guild = getattr(ctx, "guild", None) or getattr(channel, "guild", None)
+        if not channel or not guild or not self.guild or guild.id != self.guild.id:
+            return
+
+        self.context = ctx
     
     def build_embed(self, current_track: Track = None):
         """Builds an embed based on the current track state."""
@@ -480,7 +494,13 @@ class Player(VoiceProtocol):
 
     async def invoke_controller(self, *, prefer_new_message: bool = False):
         """Sends or updates the music controller message in the designated channel."""
-        if not self.settings.get('controller', True) or self._updating or not self.channel or getattr(self, "_tearing_down", False):
+        if not self.settings.get('controller', True) or not self.channel or getattr(self, "_tearing_down", False):
+            return
+        if self._updating:
+            self._controller_refresh_pending = True
+            self._controller_refresh_prefer_new_message = (
+                getattr(self, "_controller_refresh_prefer_new_message", False) or prefer_new_message
+            )
             return
         self._updating = True
 
@@ -536,6 +556,14 @@ class Player(VoiceProtocol):
         
         finally:
             self._updating = False
+            if getattr(self, "_controller_refresh_pending", False) and not getattr(self, "_tearing_down", False):
+                queued_prefer_new_message = getattr(self, "_controller_refresh_prefer_new_message", False)
+                self._controller_refresh_pending = False
+                self._controller_refresh_prefer_new_message = False
+                self._start_background_task(
+                    self.invoke_controller(prefer_new_message=queued_prefer_new_message),
+                    "controller_refresh_retry",
+                )
 
     async def is_position_fresh(self):
         """Checks if the current controller message is among the most recent messages."""
@@ -552,9 +580,15 @@ class Player(VoiceProtocol):
 
         return False
 
-    async def refresh_controller_after_queue_update(self) -> None:
+    async def refresh_controller_after_queue_update(self, ctx: Optional[Union[commands.Context, Interaction, TempCtx]] = None) -> None:
         """Keeps the controller visible after queue additions without duplicating sticky request-channel controllers."""
+        self.bind_controller_context(ctx)
         await self.invoke_controller(prefer_new_message=True)
+
+    async def refresh_controller_for_state_change(self, ctx: Optional[Union[commands.Context, Interaction, TempCtx]] = None) -> None:
+        """Refreshes the existing controller in place after state or queue mutations."""
+        self.bind_controller_context(ctx)
+        await self.invoke_controller(prefer_new_message=False)
     
     async def teardown(self):
         """Cleans up the player and associated resources."""
