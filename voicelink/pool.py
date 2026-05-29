@@ -59,9 +59,6 @@ if TYPE_CHECKING:
 URL_REGEX = re.compile(
     r"https?://(?:www\.)?.+"
 )
-SPOTIFY_URL_REGEX = re.compile(
-    r"https?://open\.spotify\.com/(?P<kind>track|playlist|album|artist)/(?P<id>[A-Za-z0-9]+)"
-)
 
 NODE_VERSION = "v4"
 DEFAULT_NODE_TIMEOUT = aiohttp.ClientTimeout(total=30, connect=10, sock_connect=10, sock_read=30)
@@ -123,9 +120,6 @@ class Node:
 
         self._players: Dict[int, Player] = {}
         self._info: Optional[NodeInfo] = None
-        self._lavasrc_spotify_partner_api: Optional[bool] = None
-        self._lavasrc_spotify_config_lock = asyncio.Lock()
-        
         self.yt_ratelimit: Optional[YTRatelimit] = STRATEGY.get(yt_ratelimit.get("strategy"))(self, yt_ratelimit) if yt_ratelimit and yt_ratelimit.get("tokens") else None
 
         self._bot.add_listener(self._update_handler, "on_socket_response")
@@ -423,43 +417,6 @@ class Node:
             exc_info=exc_info,
         )
 
-    @staticmethod
-    def _spotify_partner_api_for_query(query: str) -> Optional[bool]:
-        match = SPOTIFY_URL_REGEX.match(query)
-        if not match:
-            return None
-
-        kind = match.group("kind")
-        if kind == "track":
-            return False
-        if kind == "playlist":
-            return True
-        return None
-
-    async def _set_lavasrc_spotify_partner_api(self, enabled: bool) -> None:
-        async with self._lavasrc_spotify_config_lock:
-            if self._lavasrc_spotify_partner_api is enabled:
-                return
-
-            uri = f"{self._rest_uri}/{NODE_VERSION}/lavasrc/config"
-            payload = {
-                "spotify": {
-                    "preferPartnerApi": enabled,
-                    "preferV1SearchApi": True,
-                }
-            }
-            async with self._session.request(
-                method="PATCH",
-                url=uri,
-                headers={"Authorization": self._password},
-                json=payload,
-            ) as resp:
-                if resp.status >= 300:
-                    body = await resp.text()
-                    raise NodeException(f"Unable to update LavaSrc Spotify config: {body}")
-
-            self._lavasrc_spotify_partner_api = enabled
-
     async def get_tracks(
         self,
         query: str,
@@ -479,19 +436,6 @@ class Node:
             
         if not URL_REGEX.match(query) and ':' not in query:
             query = f"{search_type}:{query}"
-
-        prefer_partner_api = self._spotify_partner_api_for_query(query)
-        if prefer_partner_api is not None:
-            try:
-                await self._set_lavasrc_spotify_partner_api(prefer_partner_api)
-            except Exception as error:
-                self._log_track_lookup_failure(
-                    query=query,
-                    requester=requester,
-                    search_type=search_type,
-                    error=error,
-                )
-                raise
 
         try:
             response: dict[str, Any] = await self.send(
