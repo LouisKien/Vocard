@@ -23,7 +23,9 @@ SOFTWARE.
 
 from __future__ import annotations
 
-import time, logging, asyncio
+import asyncio
+import logging
+import time
 
 from math import ceil
 from random import shuffle, choice
@@ -66,11 +68,11 @@ async def connect_channel(ctx: Union[commands.Context, Interaction], channel: Vo
     texts = await LangHandler.get_lang(ctx.guild.id, "voice.connection.noChannel", "voice.connection.noPermission")
     try:
         channel = channel or ctx.author.voice.channel if isinstance(ctx, commands.Context) else ctx.user.voice.channel
-    except:
+    except AttributeError:
         raise VoicelinkException(texts[0])
 
     check = channel.permissions_for(ctx.guild.me)
-    if check.connect == False or check.speak == False:
+    if not check.connect or not check.speak:
         raise VoicelinkException(texts[1])
 
     settings = await MongoDBHandler.get_settings(channel.guild.id)
@@ -491,7 +493,7 @@ class Player(VoiceProtocol):
             async for message in self.context.channel.history(limit=5):
                 if message.id == self.controller.id:
                     return True
-        except:
+        except (AttributeError, errors.HTTPException):
             pass
 
         return False
@@ -521,8 +523,13 @@ class Player(VoiceProtocol):
 
         try:
             await self.destroy()
-        except:
-            pass
+        except Exception as error:
+            if self._logger:
+                self._logger.warning(
+                    "Player teardown ignored a destroy failure for guild %s",
+                    self.guild.id if self.guild else "unknown",
+                    exc_info=error,
+                )
 
     async def get_tracks(
         self,
@@ -571,7 +578,7 @@ class Player(VoiceProtocol):
         
         try:
             await self.disconnect()
-        except:
+        except (AttributeError, errors.DiscordException):
             # 'NoneType' has no attribute '_get_voice_client_key' raised by self.cleanup() ->
             # assume we're already disconnected and cleaned up
             assert self.channel is None and not self.is_connected
@@ -928,7 +935,7 @@ class Player(VoiceProtocol):
         """Changes the audio processing node for the guild.."""
         try:
             node = NodePool.get_node(identifier=identifier)
-        except:
+        except Exception:
             return await self.teardown()
 
         self._node._players.pop(self.guild.id)

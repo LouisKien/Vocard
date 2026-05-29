@@ -26,6 +26,7 @@ import json
 import os
 import logging
 import voicelink
+import tempfile
 
 from pathlib import Path
 from discord.ext import commands
@@ -45,7 +46,7 @@ def open_json(path: str) -> dict:
 
         with open(target, encoding="utf8") as json_file:
             return json.load(json_file)
-    except:
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
         return {}
 
 def update_json(path: str, new_data: dict) -> None:
@@ -62,8 +63,11 @@ def update_json(path: str, new_data: dict) -> None:
     else:
         data.update(new_data)
 
-    with open(target, "w", encoding="utf8") as json_file:
-        json.dump(data, json_file, indent=4)
+    with tempfile.NamedTemporaryFile("w", encoding="utf8", dir=target.parent, delete=False) as temp_file:
+        json.dump(data, temp_file, indent=4)
+        temp_path = Path(temp_file.name)
+
+    temp_path.replace(target)
 
 def settings_override_exists() -> bool:
     return SETTINGS_FILE.exists() and _get_env("VOCARD_IGNORE_SETTINGS_JSON") not in {"1", "true", "yes", "on"}

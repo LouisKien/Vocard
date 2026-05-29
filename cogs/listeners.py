@@ -191,7 +191,7 @@ class Listeners(commands.Cog):
                 log_message,
             )
             await player.context.send(message, delete_after=10)
-        except:
+        except discord.HTTPException:
             pass
 
     @commands.Cog.listener()

@@ -213,7 +213,7 @@ class Settings(commands.Cog, name="settings"):
         if player and toggle is False and player.controller:
             try:
                 await player.controller.delete()
-            except:
+            except discord.HTTPException:
                 discord.ui.View.from_message(player.controller).stop()
 
         await MongoDBHandler.update_settings(ctx.guild.id, {"$set": {'controller': toggle}})
@@ -295,7 +295,7 @@ class Settings(commands.Cog, name="settings"):
                     )
                 }
                 channel = await ctx.guild.create_text_channel("vocard-song-requests", overwrites=overwrites)
-            except:
+            except discord.HTTPException:
                 return await send_localized_message(ctx, "permissions.noCreatePermission")
 
         channel_perms = channel.permissions_for(ctx.me)

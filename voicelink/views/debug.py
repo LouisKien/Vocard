@@ -376,7 +376,7 @@ class DebugView(discord.ui.View):
         for name in self.bot.cogs.copy().keys():
             try:
                 await self.bot.unload_extension(name)
-            except:
+            except Exception:
                 pass
 
         player_data = []
@@ -388,7 +388,7 @@ class DebugView(discord.ui.View):
                 player_data.append(player.data)
                 try:
                     await player.teardown()
-                except:
+                except Exception:
                     pass
 
         if os.path.exists(Config.LAST_SESSION_FILE_DIR):

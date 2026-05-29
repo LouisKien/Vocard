@@ -85,7 +85,7 @@ class InboxView(discord.ui.View):
             child.disabled = True
         try:
             await self.response.edit(view=self)
-        except:
+        except discord.HTTPException:
             pass
         
     @discord.ui.button(label='Accept', style=discord.ButtonStyle.green, custom_id="accept", disabled=True)

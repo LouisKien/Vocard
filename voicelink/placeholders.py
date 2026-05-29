@@ -164,7 +164,8 @@ class PlayerPlaceholder:
         return self.player.get_msg(text)
         
     def replace(self, text: str, variables: dict[str, str]) -> str:
-        if not text or text.isspace(): return
+        if not text or text.isspace():
+            return
 
         matches: list[str] = re.findall(r"\{\{(.*?)\}\}", text)
 
@@ -192,7 +193,7 @@ class PlayerPlaceholder:
                 replacement = true_value if result else false_value
                 text = text.replace("{{" + match + "}}", replacement)
 
-            except:
+            except Exception:
                 text = text.replace("{{" + match + "}}", "")
 
         for regex_pattern, func in self.regexes.items():
@@ -235,7 +236,7 @@ class PlayerPlaceholder:
             embed.description = placeholder.replace(embed_form.get("description"), rv)
             embed.color = int(placeholder.replace(embed_form.get("color"), rv))
 
-        except:
+        except Exception:
             pass
 
         return embed

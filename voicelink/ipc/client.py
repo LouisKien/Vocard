@@ -47,7 +47,7 @@ class IPCClient:
             try:
                 msg = await self._websocket.receive()
                 self._logger.debug(f"Received Message: {msg}")
-            except:
+            except Exception:
                 break
 
             if msg.type in [aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSED]:

@@ -59,5 +59,5 @@ class SearchView(discord.ui.View):
             child.disabled = True
         try:
             await self.response.edit(view=self)
-        except:
+        except discord.HTTPException:
             pass

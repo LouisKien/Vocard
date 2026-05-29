@@ -76,7 +76,7 @@ class Queue:
             track = self._queue[self._position - 1 if self._repeat.mode == LoopType.TRACK else self._position]
             if self._repeat.mode != LoopType.TRACK:
                 self._position += 1
-        except:
+        except IndexError:
             if self._repeat.mode == LoopType.QUEUE:
                 try:
                     track = self._queue[self._repeat_position]
@@ -149,7 +149,7 @@ class Queue:
             self._queue.remove(item)
             self.put_at_index(to, item)
             return item
-        except:
+        except (IndexError, ValueError):
             raise OutofList(self.get_msg("queue.errors.outOfList"))
 
     def remove(self, index: int, index2: int = None, member: discord.Member = None) -> Dict[int, Track]:
@@ -171,7 +171,7 @@ class Queue:
                 removed_tracks[pos + index + i] = track
 
             return removed_tracks
-        except:
+        except ValueError:
             raise OutofList(self.get_msg("queue.errors.outOfList"))
 
     def history(self, incTrack: bool = False) -> List[Track]:
@@ -196,7 +196,7 @@ class Queue:
     def is_empty(self) -> bool:
         try:
             self._queue[self._position]
-        except:
+        except IndexError:
             return True
         return False
 

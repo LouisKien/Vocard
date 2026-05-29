@@ -10,6 +10,8 @@ services:
     image: ${MONGO_IMAGE:-mongo:4.4.29-focal}
     restart: unless-stopped
     init: true
+    stop_grace_period: 45s
+    command: ["mongod", "--wiredTigerCacheSizeGB", "${MONGO_WIREDTIGER_CACHE_SIZE_GB:-0.25}"]
     env_file: *vocard-env
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:-}
@@ -57,9 +59,11 @@ services:
     user: "0:0"
     restart: unless-stopped
     init: true
+    stop_grace_period: 45s
     env_file: *vocard-env
     environment:
       LAVALINK_PASSWORD: ${LAVALINK_PASSWORD:-change-me}
+      JAVA_TOOL_OPTIONS: "${LAVALINK_JAVA_OPTS:--Xms128m -Xmx512m -XX:+UseG1GC -XX:MaxGCPauseMillis=200}"
     depends_on:
       spotify-tokener:
         condition: service_healthy
@@ -86,6 +90,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     init: true
+    stop_grace_period: 30s
     env_file: *vocard-env
     depends_on:
       mongo:

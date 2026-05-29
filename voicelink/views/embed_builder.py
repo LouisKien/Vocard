@@ -67,7 +67,7 @@ class EmbedBuilderView(discord.ui.View):
             child.disabled = True
         try:
             await self.response.edit(view=self)
-        except:
+        except discord.HTTPException:
             pass
 
     async def interaction_check(self, interaction: discord.Interaction):
@@ -130,7 +130,7 @@ class EmbedBuilderView(discord.ui.View):
 
             data["title"]["name"] = v['title']
             data["title"]["url"] = v['url']
-        except:
+        except (TypeError, ValueError, KeyError):
             pass
 
         return await self.response.edit(embed=self.build_embed())
@@ -330,7 +330,7 @@ class EmbedBuilderView(discord.ui.View):
 
         try:
             del data["fields"][int(modal.values["index"])]
-        except:
+        except (IndexError, KeyError, ValueError):
             return await interaction.followup.send("Can't found the field", ephemeral=True)
         
         return await self.response.edit(embed=self.build_embed())
@@ -355,5 +355,3 @@ class EmbedBuilderView(discord.ui.View):
     async def stop_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.response.delete()
         self.stop()
-
-        

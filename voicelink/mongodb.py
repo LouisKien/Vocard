@@ -131,6 +131,10 @@ class MongoDBHandler:
                     uri,
                     maxPoolSize=_get_int_env("MONGODB_MAX_POOL_SIZE", 10),
                     minPoolSize=_get_int_env("MONGODB_MIN_POOL_SIZE", 0),
+                    serverSelectionTimeoutMS=_get_int_env("MONGODB_SERVER_SELECTION_TIMEOUT_MS", 10000),
+                    connectTimeoutMS=_get_int_env("MONGODB_CONNECT_TIMEOUT_MS", 10000),
+                    socketTimeoutMS=_get_int_env("MONGODB_SOCKET_TIMEOUT_MS", 30000),
+                    waitQueueTimeoutMS=_get_int_env("MONGODB_WAIT_QUEUE_TIMEOUT_MS", 10000),
                     maxIdleTimeMS=60000,
                     retryWrites=True
                 )
@@ -307,6 +311,30 @@ class MongoDBHandler:
 
         except Exception as e:
             raise ConnectionError(f"Failed to retrieve settings: {str(e)}")
+
+    @classmethod
+    def get_cached_user(
+        cls,
+        user_id: int,
+        *,
+        d_type: Optional[str] = None,
+        need_copy: bool = True,
+    ) -> Dict[str, Any]:
+        try:
+            if user_id not in cls._users_buffer:
+                return {}
+
+            cls._last_access[user_id] = time.time()
+            user = cls._users_buffer[user_id]
+
+            if d_type:
+                if d_type not in cls._user_base:
+                    raise ValueError(f"Invalid data type: {d_type}")
+                user = user.get(d_type, copy.deepcopy(cls._user_base.get(d_type)))
+
+            return copy.deepcopy(user) if need_copy else user
+        except Exception as e:
+            raise ConnectionError(f"Failed to retrieve cached user data: {str(e)}")
         
     @classmethod
     async def get_settings(
@@ -428,6 +456,16 @@ class MongoDBHandler:
             ValueError: If invalid d_type is provided
         """
         try:
+            if not force_refresh and user_id in cls._users_buffer:
+                cls._last_access[user_id] = time.time()
+                user = cls._users_buffer[user_id]
+                if d_type:
+                    if d_type not in cls._user_base:
+                        raise ValueError(f"Invalid data type: {d_type}")
+                    user = user.setdefault(d_type, copy.deepcopy(cls._user_base.get(d_type)))
+
+                return copy.deepcopy(user) if need_copy else user
+
             async with cls._lock:
                 # Check if we need fresh data
                 if force_refresh or user_id not in cls._users_buffer:

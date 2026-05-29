@@ -97,7 +97,11 @@ class Basic(commands.Cog):
 
             return [app_commands.Choice(name=truncate_string(f"🎵 [{track.formatted_length}] {track.author} - {track.title}", 100), value=track.uri) for track in tracks]
         
-        history = {track["identifier"]: track for track_id in reversed(await MongoDBHandler.get_user(interaction.user.id, d_type="history")) if (track := voicelink.Track.decode(track_id))["uri"]}
+        history_source = MongoDBHandler.get_cached_user(interaction.user.id, d_type="history")
+        if not history_source:
+            history_source = await MongoDBHandler.get_user(interaction.user.id, d_type="history")
+
+        history = {track["identifier"]: track for track_id in reversed(history_source) if (track := voicelink.Track.decode(track_id))["uri"]}
         return [app_commands.Choice(name=truncate_string(f"🕒 [{format_ms(track['length'])}] {track['author']} - {track['title']}", 100), value=track['uri']) for track in history.values() if len(track['uri']) <= 100][:25]
             
     @commands.hybrid_command(name="connect", aliases=get_aliases("connect"))

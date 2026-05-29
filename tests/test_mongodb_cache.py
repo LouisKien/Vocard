@@ -66,6 +66,10 @@ def test_mongodb_pool_defaults_are_small_for_single_guild_homelab(monkeypatch) -
 
         assert _FakeMongoClient.options["maxPoolSize"] == 10
         assert _FakeMongoClient.options["minPoolSize"] == 0
+        assert _FakeMongoClient.options["serverSelectionTimeoutMS"] == 10000
+        assert _FakeMongoClient.options["connectTimeoutMS"] == 10000
+        assert _FakeMongoClient.options["socketTimeoutMS"] == 30000
+        assert _FakeMongoClient.options["waitQueueTimeoutMS"] == 10000
     finally:
         MongoDBHandler._client = original_client
         MongoDBHandler._db = original_db
@@ -97,4 +101,30 @@ def test_get_settings_cache_hit_does_not_require_global_lock(monkeypatch) -> Non
     finally:
         MongoDBHandler._lock = original_lock
         MongoDBHandler._settings_buffer = original_buffer
+        MongoDBHandler._last_access = original_last_access
+
+
+def test_get_user_cache_hit_does_not_require_global_lock() -> None:
+    class _FailIfEnteredLock:
+        async def __aenter__(self):
+            raise AssertionError("user cache hit should not enter the global MongoDB lock")
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    original_lock = MongoDBHandler._lock
+    original_buffer = copy.deepcopy(MongoDBHandler._users_buffer)
+    original_last_access = copy.deepcopy(MongoDBHandler._last_access)
+    try:
+        MongoDBHandler._lock = _FailIfEnteredLock()
+        MongoDBHandler._users_buffer = {654: {"_id": 654, "history": ["track-a"]}}
+        MongoDBHandler._last_access = {}
+
+        user = asyncio.run(MongoDBHandler.get_user(654))
+
+        assert user["history"] == ["track-a"]
+        assert 654 in MongoDBHandler._last_access
+    finally:
+        MongoDBHandler._lock = original_lock
+        MongoDBHandler._users_buffer = original_buffer
         MongoDBHandler._last_access = original_last_access

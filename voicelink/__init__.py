@@ -26,17 +26,17 @@ __author__ = 'Vocard Development, ChocoMeow'
 __license__ = "MIT"
 __copyright__ = "Copyright 2023 - present (c) Vocard Development, ChocoMeow"
 
-from .config import Config
-from .enums import SearchType, LoopType, TrackRecType
-from .events import *
-from .exceptions import *
-from .filters import *
-from .objects import *
-from .pool import *
-from .queue import *
-from .player import Player, connect_channel
-from .placeholders import PlayerPlaceholder, BotPlaceholder
-from .mongodb import MongoDBHandler
-from .language import LangHandler
-from .lyrics import LYRICS_PLATFORMS
-from .ipc import IPCClient
+from .config import Config as Config
+from .enums import SearchType as SearchType, LoopType as LoopType, TrackRecType as TrackRecType
+from .events import *  # noqa: F403
+from .exceptions import *  # noqa: F403
+from .filters import *  # noqa: F403
+from .objects import *  # noqa: F403
+from .pool import *  # noqa: F403
+from .queue import *  # noqa: F403
+from .player import Player as Player, connect_channel as connect_channel
+from .placeholders import PlayerPlaceholder as PlayerPlaceholder, BotPlaceholder as BotPlaceholder
+from .mongodb import MongoDBHandler as MongoDBHandler
+from .language import LangHandler as LangHandler
+from .lyrics import LYRICS_PLATFORMS as LYRICS_PLATFORMS
+from .ipc import IPCClient as IPCClient

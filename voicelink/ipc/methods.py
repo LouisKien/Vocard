@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-import time, re
+import re
+import time
 
 from typing import List, Dict, Union, Optional, TYPE_CHECKING
 
@@ -70,7 +71,7 @@ async def connect_channel(member: Member, bot: commands.Bot) -> Player:
         player: Player = await channel.connect(cls=Player(bot, channel, TempCtx(member, channel), settings))
         await player.send_ws({"op": "createPlayer", "memberIds": [str(member.id) for member in channel.members]})
         return player
-    except:
+    except Exception:
         return
 
 async def initBot(bot: commands.Bot, data: Dict) -> Dict:
@@ -304,8 +305,8 @@ async def updatePause(player: Player, member: Member, data: Dict) -> None:
 
 @require_permission()
 async def updatePosition(player: Player, member: Member, data: Dict) -> None:
-    position = data.get("position");
-    await player.seek(position, member);
+    position = data.get("position")
+    await player.seek(position, member)
 
 async def toggleAutoplay(player: Player, member: Member, data: Dict) -> Dict:
     if not player.is_privileged(member):
@@ -751,7 +752,7 @@ async def process_methods(ipc_client: IPCClient, bot: commands.Bot, data: Dict) 
         args: List = []
         
         params = method.params
-        if not (type(method) == SystemMethod):
+        if not isinstance(method, SystemMethod):
             if guild_id := data.get("guildId"):
                 if (guild := bot.get_guild(int(guild_id))):
                     env["guild"] = guild

@@ -64,6 +64,8 @@ SPOTIFY_URL_REGEX = re.compile(
 )
 
 NODE_VERSION = "v4"
+DEFAULT_NODE_TIMEOUT = aiohttp.ClientTimeout(total=30, connect=10, sock_connect=10, sock_read=30)
+DEFAULT_NODE_CONNECTOR_LIMIT = 20
 
 class Node:
     """The base class for a node. 
@@ -94,13 +96,17 @@ class Node:
         self._identifier: str = identifier
         self._heartbeat: int = heartbeat
         self._secure: bool = secure
-        self._logger: Optional[logging.Logger] = logger
+        self._logger: logging.Logger = logger or logging.getLogger("vocard")
         self._stats: Optional[NodeStats] = None
 
         self._websocket_uri: str = f"{'wss' if self._secure else 'ws'}://{self._host}:{self._port}/" + NODE_VERSION + "/websocket"
         self._rest_uri: str = f"{'https' if self._secure else 'http'}://{self._host}:{self._port}"
 
-        self._session: aiohttp.ClientSession = session or aiohttp.ClientSession()
+        self._owns_session: bool = session is None
+        self._session: aiohttp.ClientSession = session or aiohttp.ClientSession(
+            timeout=DEFAULT_NODE_TIMEOUT,
+            connector=aiohttp.TCPConnector(limit=DEFAULT_NODE_CONNECTOR_LIMIT, ttl_dns_cache=300),
+        )
         self._websocket: aiohttp.ClientWebSocketResponse = None
         self._task: asyncio.Task = None
 
@@ -265,7 +271,8 @@ class Node:
             json=data
         ) as resp:
             if resp.status >= 300:
-                raise NodeException("Getting errors from Lavalink REST api")
+                body = await resp.text()
+                raise NodeException(f"Lavalink REST API returned {resp.status}: {body}")
             
             if method == RequestMethod.DELETE:
                 return await resp.json(content_type=None)
@@ -315,11 +322,15 @@ class Node:
         for player in self.players.copy().values():
             await player.teardown()
         
-        await self._websocket.close()
+        if self._websocket and not self._websocket.closed:
+            await self._websocket.close()
         if remove_from_pool:
             del self._pool._nodes[self._identifier]
         self._available = False
-        self._task.cancel()
+        if self._task:
+            self._task.cancel()
+        if self._owns_session and not self._session.closed:
+            await self._session.close()
         
         self._logger.info(f"Node [{self._identifier}] is disconnected!")
 
@@ -336,7 +347,7 @@ class Node:
 
                     if player.is_paused:
                         await player.set_pause(True)
-            except:
+            except Exception:
                 await player.teardown()
             await asyncio.sleep(2)
 
@@ -549,7 +560,8 @@ class Node:
             json={"refreshToken": token.token}
         ) as resp:
             if resp.status >= 300:
-                raise NodeException("Getting errors from Lavalink REST api")
+                body = await resp.text()
+                raise NodeException(f"Lavalink YouTube token refresh failed with {resp.status}: {body}")
 
 class NodePool:
     """The base class for the node pool.

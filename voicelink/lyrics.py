@@ -94,7 +94,7 @@ class A_ZLyrics(LyricsPlatform):
                 if resp.status != 200:
                     return None
                 return await resp.text()
-        except:
+        except aiohttp.ClientError:
             return ""
 
     async def get_lyrics(self, title: str, artist: str) -> dict[str, str]:
@@ -127,7 +127,7 @@ class A_ZLyrics(LyricsPlatform):
                     del lyrics_parts[count-1]
                 return {lyrics_parts[i].replace("[", "").replace(":]", ""): self.clearText(lyrics_parts[i + 1]) for i in range(0, len(lyrics_parts), 2)}
             return {"default": self.clearText(lyrics_parts[0])}
-        except:
+        except (IndexError, TypeError, ValueError, AttributeError):
             return None
 
     async def googleGet(self, acc = 0.6, artist='', title='') -> Optional[str]:
@@ -138,7 +138,7 @@ class A_ZLyrics(LyricsPlatform):
 
         try:
             results = re.findall(r'(azlyrics\.com\/lyrics\/[a-z0-9]+\/(\w+).html)', google_page)
-        except:
+        except TypeError:
             return None
             
         if len(results):
@@ -227,7 +227,7 @@ class Lyrist(LyricsPlatform):
                 
                 data = await resp.json()
                 return {"default": data["lyrics"]}
-        except:
+        except aiohttp.ClientError:
             return None
 
 class Lrclib(LyricsPlatform):
@@ -241,7 +241,7 @@ class Lrclib(LyricsPlatform):
                 if resp.status != 200:
                     return None
                 return await resp.json()
-        except:
+        except aiohttp.ClientError:
             return []
         
     async def get_lyrics(self, title: str, artist: str) -> Optional[dict[str, str]]:

@@ -109,7 +109,9 @@ class Vocard(commands.Bot):
             return await message.channel.send(f"My prefix is `{prefix}`")
 
         # Fetch guild settings and check if the mesage is in the music request channel
-        settings = await MongoDBHandler.get_settings(message.guild.id)
+        settings = MongoDBHandler.get_cached_settings(message.guild.id)
+        if not settings:
+            settings = await MongoDBHandler.get_settings(message.guild.id)
         if settings and (request_channel := settings.get("music_request_channel")):
             if message.channel.id == request_channel.get("text_channel_id"):
                 ctx = await self.get_context(message)    
@@ -223,7 +225,7 @@ class Vocard(commands.Bot):
 
         try:
             return await ctx.reply(error, ephemeral=True)
-        except:
+        except discord.HTTPException:
             pass
 
 class CommandCheck(discord.app_commands.CommandTree):
@@ -247,7 +249,9 @@ class CommandCheck(discord.app_commands.CommandTree):
 async def get_prefix(bot: commands.Bot, message: discord.Message) -> str:
     if not bot_config.is_allowed_guild(message.guild.id):
         return ""
-    settings = await MongoDBHandler.get_settings(message.guild.id)
+    settings = MongoDBHandler.get_cached_settings(message.guild.id)
+    if not settings:
+        settings = await MongoDBHandler.get_settings(message.guild.id)
     prefix = settings.get("prefix", bot_config.bot_prefix)
     return prefix if prefix is not None else ""
 

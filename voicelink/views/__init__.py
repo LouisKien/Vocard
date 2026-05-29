@@ -21,15 +21,26 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
 
-from .embed_builder import EmbedBuilderView
-from .controller import InteractiveController
-from .debug import DebugView
-from .link import LinkView
-from .inbox import InboxView
-from .playlist import PlaylistViewManager
-from .lyrics import LyricsView
-from .queue import QueueView
-from .help import HelpView
-from .search import SearchView
-from discord.ext import commands
+from .embed_builder import EmbedBuilderView as EmbedBuilderView
+from .controller import InteractiveController as InteractiveController
+from .debug import DebugView as DebugView
+from .link import LinkView as LinkView
+from .inbox import InboxView as InboxView
+from .playlist import PlaylistViewManager as PlaylistViewManager
+from .lyrics import LyricsView as LyricsView
+from .queue import QueueView as QueueView
+from .help import HelpView as HelpView
+from .search import SearchView as SearchView
 
+__all__ = [
+    "DebugView",
+    "EmbedBuilderView",
+    "HelpView",
+    "InboxView",
+    "InteractiveController",
+    "LinkView",
+    "LyricsView",
+    "PlaylistViewManager",
+    "QueueView",
+    "SearchView",
+]

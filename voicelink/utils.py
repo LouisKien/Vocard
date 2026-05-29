@@ -180,10 +180,10 @@ class Ping:
             self._stop = 0
 
         def start(self):
-            self._start = timer()
+            self._start = time.perf_counter()
 
         def stop(self):
-            self._stop = timer()
+            self._stop = time.perf_counter()
 
         def cost(self, funcs, args):
             self.start()

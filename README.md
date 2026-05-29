@@ -39,7 +39,10 @@ Fill these in `.env` before production use:
 - `MONGO_IMAGE`: defaults to `mongo:4.4.29-focal` for Intel N4100 and other non-AVX CPUs.
 - `MONGO_INITDB_ROOT_USERNAME`, `MONGO_INITDB_ROOT_PASSWORD`, `MONGODB_URL`, `MONGODB_NAME`.
 - `MONGODB_MAX_POOL_SIZE`, `MONGODB_MIN_POOL_SIZE`: default to `10` and `0` for a small single-guild homelab.
+- `MONGODB_SERVER_SELECTION_TIMEOUT_MS`, `MONGODB_CONNECT_TIMEOUT_MS`, `MONGODB_SOCKET_TIMEOUT_MS`, `MONGODB_WAIT_QUEUE_TIMEOUT_MS`: keep Mongo fail-fast instead of hanging on broken I/O.
+- `MONGO_WIREDTIGER_CACHE_SIZE_GB`: defaults to `0.25` to keep Mongo memory usage sane on low-end homelab machines.
 - `LAVALINK_HOST`, `LAVALINK_PORT`, `LAVALINK_PASSWORD`.
+- `LAVALINK_JAVA_OPTS`: defaults to `-Xms128m -Xmx512m -XX:+UseG1GC -XX:MaxGCPauseMillis=200` to avoid oversized JVM defaults on small hosts.
 - `LAVASRC_SPOTIFY_CLIENT_ID`, `LAVASRC_SPOTIFY_CLIENT_SECRET`.
 
 `CLIENT_ID` is optional; the bot derives it from Discord after login. `DEFAULT_LANGUAGE=VN` is the homelab default; message strings use `langs/VN.json`, and Discord slash-command localization uses `local_langs/vi.json`.
@@ -79,6 +82,12 @@ MongoDB and Lavalink plugin jars persist in named volumes:
 
 - `mongo_data`
 - `lavalink_plugins`
+
+The Compose defaults in this fork intentionally favor stability on small homelab hardware:
+
+- MongoDB is pinned to `4.4` for non-AVX CPUs and uses a conservative WiredTiger cache cap by default.
+- Lavalink keeps the quality-first audio settings in `lavalink/application.yml`, but the JVM heap is bounded so the music node does not over-claim RAM.
+- The bot container enables Python fault-handler output and writes logs to stdout/stderr by default for Docker-native troubleshooting.
 
 To reset all persisted data, explicitly remove volumes:
 
