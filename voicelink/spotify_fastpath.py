@@ -52,6 +52,10 @@ def spotify_country_code() -> str:
     return (_first_env("LAVASRC_SPOTIFY_COUNTRY_CODE", "SPOTIFY_COUNTRY_CODE", default="VN") or "VN").upper()
 
 
+def spotify_custom_token_endpoint() -> Optional[str]:
+    return _first_env("LAVASRC_SPOTIFY_CUSTOM_TOKEN_ENDPOINT", "SPOTIFY_CUSTOM_TOKEN_ENDPOINT")
+
+
 def extract_first_spotify_track_url(payload: dict[str, Any]) -> Optional[str]:
     tracks = payload.get("tracks", {})
     for item in tracks.get("items", []):
@@ -125,6 +129,29 @@ class SpotifyFastPathClient:
         self._token_expires_at: float = 0
         self._lock = asyncio.Lock()
 
+    async def _get_custom_access_token(self) -> Optional[str]:
+        endpoint = spotify_custom_token_endpoint()
+        if not endpoint:
+            return None
+
+        async with self._session.request(method="GET", url=endpoint) as resp:
+            if resp.status >= 300:
+                body = await resp.text()
+                raise RuntimeError(f"Spotify custom token request failed: {body}")
+
+            payload = await resp.json()
+            access_token = payload.get("accessToken") or payload.get("access_token")
+            if not access_token:
+                raise RuntimeError("Spotify custom token response did not include an access token")
+
+            expiry_ms = payload.get("accessTokenExpirationTimestampMs")
+            if expiry_ms:
+                self._token_expires_at = max((int(expiry_ms) / 1000) - 60, time.time() + 60)
+            else:
+                self._token_expires_at = time.time() + max(int(payload.get("expires_in", 3600)) - 60, 60)
+            self._token = access_token
+            return self._token
+
     async def _get_access_token(self) -> Optional[str]:
         if not spotify_fast_playlist_enabled():
             return None
@@ -134,6 +161,10 @@ class SpotifyFastPathClient:
         async with self._lock:
             if self._token and time.time() < self._token_expires_at:
                 return self._token
+
+            custom_token_endpoint = spotify_custom_token_endpoint()
+            if custom_token_endpoint:
+                return await self._get_custom_access_token()
 
             client_id = _first_env("LAVASRC_SPOTIFY_CLIENT_ID", "SPOTIFY_CLIENT_ID")
             client_secret = _first_env("LAVASRC_SPOTIFY_CLIENT_SECRET", "SPOTIFY_CLIENT_SECRET")

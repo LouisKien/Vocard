@@ -8,6 +8,7 @@ import voicelink
 from cogs.basic import Basic
 from voicelink.spotify_fastpath import (
     SpotifyPlaylistSeed,
+    SpotifyFastPathClient,
     extract_first_spotify_track_url,
     trim_seeded_track_from_playlist,
 )
@@ -99,6 +100,42 @@ class _FakeFallbackPlayer(_FakeFastPathPlayer):
     async def do_next(self):
         self.calls.append("do_next")
         self._is_playing = True
+
+
+class _FakeResponse:
+    def __init__(self, status: int, payload):
+        self.status = status
+        self._payload = payload
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def json(self):
+        return self._payload
+
+    async def text(self):
+        return str(self._payload)
+
+
+class _FakeSession:
+    def __init__(self, responses):
+        self._responses = list(responses)
+        self.calls = []
+
+    def request(self, *, method, url, headers=None, params=None, data=None):
+        self.calls.append(
+            {
+                "method": method,
+                "url": url,
+                "headers": headers or {},
+                "params": params or {},
+                "data": data,
+            }
+        )
+        return self._responses.pop(0)
 
 
 def test_extract_first_spotify_track_url_skips_local_and_missing_items() -> None:
@@ -246,3 +283,95 @@ def test_spotify_playlist_seed_keeps_playlist_metadata() -> None:
     assert seed.author == "Curator"
     assert seed.track_count == 25
     assert seed.first_track_url == "https://open.spotify.com/track/track-1"
+
+
+def test_fastpath_prefers_custom_token_endpoint_for_playlist_seed(monkeypatch) -> None:
+    monkeypatch.setenv("SPOTIFY_FAST_PLAYLIST_START", "true")
+    monkeypatch.setenv("LAVASRC_SPOTIFY_CLIENT_ID", "client-id")
+    monkeypatch.setenv("LAVASRC_SPOTIFY_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("LAVASRC_SPOTIFY_CUSTOM_TOKEN_ENDPOINT", "http://spotify-tokener:8080/api/token")
+
+    session = _FakeSession(
+        [
+            _FakeResponse(
+                200,
+                {
+                    "accessToken": "anon-token",
+                    "accessTokenExpirationTimestampMs": str(9_999_999_999_999),
+                },
+            ),
+            _FakeResponse(
+                200,
+                {
+                    "name": "Spotify Mix",
+                    "external_urls": {"spotify": "https://open.spotify.com/playlist/playlist-id"},
+                    "images": [{"url": "https://cdn.example/playlist.jpg"}],
+                    "owner": {"display_name": "Curator"},
+                    "tracks": {
+                        "total": 25,
+                        "items": [
+                            {
+                                "track": {
+                                    "id": "track-1",
+                                    "external_urls": {"spotify": "https://open.spotify.com/track/track-1"},
+                                }
+                            }
+                        ],
+                    },
+                },
+            ),
+        ]
+    )
+
+    client = SpotifyFastPathClient(session)
+    seed = asyncio.run(
+        client.get_playlist_seed("https://open.spotify.com/playlist/37i9dQZF1DWVOaOWiVD1Lf?si=abc")
+    )
+
+    assert seed is not None
+    assert seed.first_track_url == "https://open.spotify.com/track/track-1"
+    assert session.calls[0]["url"] == "http://spotify-tokener:8080/api/token"
+    assert session.calls[1]["headers"]["Authorization"] == "Bearer anon-token"
+
+
+def test_fastpath_uses_client_credentials_when_custom_token_endpoint_is_missing(monkeypatch) -> None:
+    monkeypatch.setenv("SPOTIFY_FAST_PLAYLIST_START", "true")
+    monkeypatch.setenv("LAVASRC_SPOTIFY_CLIENT_ID", "client-id")
+    monkeypatch.setenv("LAVASRC_SPOTIFY_CLIENT_SECRET", "client-secret")
+    monkeypatch.delenv("LAVASRC_SPOTIFY_CUSTOM_TOKEN_ENDPOINT", raising=False)
+    monkeypatch.delenv("SPOTIFY_CUSTOM_TOKEN_ENDPOINT", raising=False)
+
+    session = _FakeSession(
+        [
+            _FakeResponse(200, {"access_token": "client-token", "expires_in": 3600}),
+            _FakeResponse(
+                200,
+                {
+                    "name": "Spotify Mix",
+                    "external_urls": {"spotify": "https://open.spotify.com/playlist/playlist-id"},
+                    "images": [{"url": "https://cdn.example/playlist.jpg"}],
+                    "owner": {"display_name": "Curator"},
+                    "tracks": {
+                        "total": 25,
+                        "items": [
+                            {
+                                "track": {
+                                    "id": "track-1",
+                                    "external_urls": {"spotify": "https://open.spotify.com/track/track-1"},
+                                }
+                            }
+                        ],
+                    },
+                },
+            ),
+        ]
+    )
+
+    client = SpotifyFastPathClient(session)
+    seed = asyncio.run(
+        client.get_playlist_seed("https://open.spotify.com/playlist/37i9dQZF1DWVOaOWiVD1Lf?si=abc")
+    )
+
+    assert seed is not None
+    assert session.calls[0]["url"] == "https://accounts.spotify.com/api/token"
+    assert session.calls[1]["headers"]["Authorization"] == "Bearer client-token"
