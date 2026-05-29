@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import voicelink
 
 from cogs.basic import Basic
+from voicelink.views.controller import Tracks
 from voicelink.utils import TempCtx, dispatch_message
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -181,3 +182,26 @@ def test_dispatch_message_uses_provided_settings_without_fetch(monkeypatch) -> N
 
     assert sent_payload["silent"] is True
     assert sent_payload["delete_after"] == 10
+
+
+def test_controller_tracks_dropdown_is_hard_capped_to_25_options() -> None:
+    queue_tracks = [
+        SimpleNamespace(
+            title=f"Song {index}",
+            author="Artist",
+            formatted_length="03:00",
+            is_stream=False,
+            emoji="🎵",
+        )
+        for index in range(1, 31)
+    ]
+    player = SimpleNamespace(
+        queue=SimpleNamespace(is_empty=False, tracks=lambda: queue_tracks),
+        _ph=SimpleNamespace(replace=lambda value, _data: value),
+        get_msg=lambda key: "TRUC TIEP" if key == "common.status.live" else key,
+    )
+
+    select = Tracks(player=player, btn_data={"label": "chon bai", "max_options": 10})
+
+    assert len(select.options) == 25
+    assert select.options[-1].label.startswith("25.")

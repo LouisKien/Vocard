@@ -401,7 +401,7 @@ class Tracks(ControlSelect):
         
         options = []
         for index, track in enumerate(player.queue.tracks(), start=1):
-            if index > min(max(btn_data.get("max_options", 10), 1), 25):
+            if index > 25:
                 break
             options.append(discord.SelectOption(label=f"{index}. {track.title[:40]}", description=f"{track.author[:30]} · " + (player.get_msg("common.status.live") if track.is_stream else track.formatted_length), emoji=track.emoji))
 

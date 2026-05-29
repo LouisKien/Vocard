@@ -166,7 +166,7 @@
             {
                 "tracks": {
                     "label": "@@t_player.dropdown.trackSelect@@",
-                    "max_options": 10
+                    "max_options": 25
                 }
             }
         ]
