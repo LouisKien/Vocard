@@ -132,12 +132,25 @@ class LangHandler:
         if lang not in cls._langs:
             lang = cls._default_lang
 
-        lang_dict = cls._langs.get(lang, {})
-        if len(keys) == 1:
-            value = lang_dict.get(keys[0], "Not found!")
-            return value
+        def resolve(key: str) -> str:
+            lang_dict = cls._langs.get(lang, {})
+            if key in lang_dict:
+                return lang_dict[key]
 
-        values = [lang_dict.get(key, "Not found!") for key in keys]
+            english_dict = cls._langs.get("EN", {})
+            if key in english_dict:
+                return english_dict[key]
+
+            default_dict = cls._langs.get(cls._default_lang, {})
+            if key in default_dict:
+                return default_dict[key]
+
+            return "Not found!"
+
+        if len(keys) == 1:
+            return resolve(keys[0])
+
+        values = [resolve(key) for key in keys]
         return values
 
     @classmethod

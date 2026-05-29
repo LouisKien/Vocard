@@ -25,26 +25,53 @@ import discord
 from discord.ext import commands
 
 from ..config import Config
+from ..language import LangHandler
+from ..mongodb import MongoDBHandler
+
+
+def _resolve_lang(author: discord.Member) -> str:
+    guild = getattr(author, "guild", None)
+    if guild:
+        return MongoDBHandler.get_cached_settings(guild.id).get("lang", LangHandler._default_lang)
+    return LangHandler._default_lang
 
 class HelpDropdown(discord.ui.Select):
-    def __init__(self, categories: list[str]) -> None:
+    def __init__(self, categories: list[tuple[str, str]], lang: str) -> None:
         self.view: HelpView
+        texts = LangHandler._get_lang(
+            lang,
+            "help.menu.selectPlaceholder",
+            "help.menu.news",
+            "help.menu.news",
+            "help.menu.tutorial",
+            "help.menu.tutorial",
+        )
+        news_label, tutorial_label = texts[1], texts[3]
 
         super().__init__(
-            placeholder="Select Category!",
+            placeholder=texts[0],
             min_values=1, max_values=1,
             options=[
-                discord.SelectOption(emoji="🆕", label="News", description="View new updates of Vocard."),
-                discord.SelectOption(emoji="🕹️", label="Tutorial", description="How to use Vocard."),
+                discord.SelectOption(emoji="🆕", label=news_label, value="news", description=self._category_description(lang, "news")),
+                discord.SelectOption(emoji="🕹️", label=tutorial_label, value="tutorial", description=self._category_description(lang, "tutorial")),
             ] + [
-                discord.SelectOption(emoji=emoji, label=f"{category} Commands", description=f"This is {category.lower()} Category.")
-                for category, emoji in zip(categories, ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣"])
+                discord.SelectOption(
+                    emoji=emoji,
+                    label=category_label,
+                    value=category_key,
+                    description=self._category_description(lang, category_key),
+                )
+                for (category_key, category_label), emoji in zip(categories, ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣"])
             ],
             custom_id="select"
         )
+
+    @staticmethod
+    def _category_description(lang: str, category_key: str) -> str:
+        return LangHandler._get_lang(lang, f"help.categoryDescriptions.{category_key.lower()}")
     
     async def callback(self, interaction: discord.Interaction) -> None:
-        embed = self.view.build_embed(self.values[0].split(" ")[0])
+        embed = self.view.build_embed(self.values[0])
         await interaction.response.edit_message(embed=embed)
 
 class HelpView(discord.ui.View):
@@ -54,13 +81,22 @@ class HelpView(discord.ui.View):
         self.author: discord.Member = author
         self.bot: commands.Bot = bot
         self.response: discord.Message = None
-        self.categories: list[str] = [ name.capitalize() for name, cog in bot.cogs.items() if len([c for c in cog.walk_commands()]) ]
+        self.lang: str = _resolve_lang(author)
+        self.category_keys: list[str] = [name.lower() for name, cog in bot.cogs.items() if len([c for c in cog.walk_commands()])]
+        self.categories: list[tuple[str, str]] = [(key, self._display_category(key)) for key in self.category_keys]
+        button_texts = LangHandler._get_lang(
+            self.lang,
+            "help.buttons.website",
+            "help.buttons.documentation",
+            "help.buttons.github",
+            "help.buttons.donate",
+        )
 
-        self.add_item(discord.ui.Button(label='Website', emoji='🌎', url='https://vocard.xyz'))
-        self.add_item(discord.ui.Button(label='Document', emoji=':support:915152950471581696', url='https://docs.vocard.xyz'))
-        self.add_item(discord.ui.Button(label='Github', emoji=':github:1098265017268322406', url='https://github.com/ChocoMeow/Vocard'))
-        self.add_item(discord.ui.Button(label='Donate', emoji=':patreon:913397909024800878', url='https://www.patreon.com/Vocard'))
-        self.add_item(HelpDropdown(self.categories))
+        self.add_item(discord.ui.Button(label=button_texts[0], emoji='🌎', url='https://vocard.xyz'))
+        self.add_item(discord.ui.Button(label=button_texts[1], emoji=':support:915152950471581696', url='https://docs.vocard.xyz'))
+        self.add_item(discord.ui.Button(label=button_texts[2], emoji=':github:1098265017268322406', url='https://github.com/LouisKien/Vocard'))
+        self.add_item(discord.ui.Button(label=button_texts[3], emoji=':patreon:913397909024800878', url='https://www.patreon.com/Vocard'))
+        self.add_item(HelpDropdown(self.categories, self.lang))
 
     async def on_timeout(self) -> None:
         for child in self.children:
@@ -74,36 +110,64 @@ class HelpView(discord.ui.View):
     async def interaction_check(self, interaction: discord.Interaction) -> None:
         return interaction.user == self.author
 
+    def _display_category(self, category: str) -> str:
+        localized = LangHandler._get_lang(self.lang, f"help.categoryLabels.{category.lower()}")
+        return localized if localized != "Not found!" else category.capitalize()
+
+    def _category_description(self, category: str, fallback: str = "") -> str:
+        localized = LangHandler._get_lang(self.lang, f"help.categoryDescriptions.{category.lower()}")
+        return localized if localized != "Not found!" else fallback
+
     def build_embed(self, category: str) -> discord.Embed:
         category = category.lower()
+        display_categories = [("news", LangHandler._get_lang(self.lang, "help.menu.news")), ("tutorial", LangHandler._get_lang(self.lang, "help.menu.tutorial"))] + self.categories
         if category == "news":
             bot_name = Config().bot_name
-            embed = discord.Embed(title=f"{bot_name} Help Menu", url="https://discord.com/channels/811542332678996008/811909963718459392/1069971173116481636", color=Config().embed_color)
+            texts = LangHandler._get_lang(
+                self.lang,
+                "help.menu.title",
+                "help.menu.availableCategories",
+                "help.menu.informationTitle",
+                "help.menu.informationBody",
+                "help.menu.getStartedTitle",
+                "help.menu.getStartedBody",
+            )
+            embed = discord.Embed(title=texts[0].format(bot_name), url="https://discord.com/channels/811542332678996008/811909963718459392/1069971173116481636", color=Config().embed_color)
             embed.add_field(
-                name=f"Available Categories: [{2 + len(self.categories)}]",
-                value="```py\n👉 News\n2. Tutorial\n{}```".format("".join(f"{i}. {c}\n" for i, c in enumerate(self.categories, start=3))),
+                name=texts[1].format(len(display_categories)),
+                value="```py\n" + "\n".join(
+                    ("👉 " if idx == 1 else f"{idx}. ") + label
+                    for idx, (_, label) in enumerate(display_categories, start=1)
+                ) + "\n```",
                 inline=True
             )
 
-            update = f"{bot_name} is a simple music bot. It leads to a comfortable experience which is user-friendly, It supports Soundcloud, Spotify, Twitch and more!"
-            embed.add_field(name="📰 Information:", value=update, inline=True)
-            embed.add_field(name="Get Started", value=f"```Join a voice channel and /play {{Song/URL}} a song. (Names, Video Links or Playlist links are supported on {bot_name})```", inline=False)
+            embed.add_field(name=texts[2], value=texts[3].format(bot_name), inline=True)
+            embed.add_field(name=texts[4], value=f"```{texts[5].format(bot_name)}```", inline=False)
             
             return embed
 
-        embed = discord.Embed(title=f"Category: {category.capitalize()}", color=Config().embed_color)
-        embed.add_field(name=f"Categories: [{2 + len(self.categories)}]", value="```py\n" + "\n".join(("👉 " if c == category.capitalize() else f"{i}. ") + c for i, c in enumerate(['News', 'Tutorial'] + self.categories, start=1)) + "```", inline=True)
+        texts = LangHandler._get_lang(self.lang, "help.menu.categoryTitle", "help.menu.availableCategories", "help.menu.commandsTitle", "help.menu.tutorialBody")
+        embed = discord.Embed(title=texts[0].format(self._display_category(category)), color=Config().embed_color)
+        embed.add_field(
+            name=texts[1].format(len(display_categories)),
+            value="```py\n" + "\n".join(
+                ("👉 " if key == category else f"{i}. ") + label
+                for i, (key, label) in enumerate(display_categories, start=1)
+            ) + "\n```",
+            inline=True,
+        )
 
         if category == 'tutorial':
-            embed.description = "How can use Vocard? Some simple commands you should know now after watching this video."
+            embed.description = texts[3]
             embed.set_image(url="https://cdn.discordapp.com/attachments/674788144931012638/917656288899514388/final_61aef3aa7836890135c6010c_669380.gif")
         else:
             cog = [c for _, c in self.bot.cogs.items() if _.lower() == category][0]
 
             commands = [command for command in cog.walk_commands()]
-            embed.description = cog.description
+            embed.description = self._category_description(category, cog.description)
             embed.add_field(
-                name=f"{category} Commands: [{len(commands)}]",
+                name=texts[2].format(self._display_category(category), len(commands)),
                 value="```{}```".format("".join(f"/{command.qualified_name}\n" for command in commands if not command.qualified_name == cog.qualified_name))
             )
 

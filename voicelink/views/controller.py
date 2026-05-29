@@ -403,7 +403,7 @@ class Tracks(ControlSelect):
         for index, track in enumerate(player.queue.tracks(), start=1):
             if index > min(max(btn_data.get("max_options", 10), 1), 25):
                 break
-            options.append(discord.SelectOption(label=f"{index}. {track.title[:40]}", description=f"{track.author[:30]} · " + ("Live" if track.is_stream else track.formatted_length), emoji=track.emoji))
+            options.append(discord.SelectOption(label=f"{index}. {track.title[:40]}", description=f"{track.author[:30]} · " + (player.get_msg("common.status.live") if track.is_stream else track.formatted_length), emoji=track.emoji))
 
         super().__init__(
             placeholder=player._ph.replace(btn_data.get("label"), {}),
@@ -427,7 +427,7 @@ class Tracks(ControlSelect):
 
 class Effects(ControlSelect):
     def __init__(self, player: "voicelink.Player", btn_data, row):
-        options = [discord.SelectOption(label="None", value="None")]
+        options = [discord.SelectOption(label=player.get_msg("common.status.none"), value="None")]
         for name in voicelink.Filters.get_available_filters():
             options.append(discord.SelectOption(label=name.capitalize(), value=name))
 
@@ -514,7 +514,8 @@ class InteractiveController(discord.ui.View):
     async def on_error(self, interaction: discord.Interaction, error: Exception, item: discord.ui.Item) -> None:
         if isinstance(error, ButtonOnCooldown):
             sec = int(error.retry_after)
-            return await interaction.response.send_message(f"You're on cooldown for {sec} second{'' if sec == 1 else 's'}!", ephemeral=True)
+            text = await LangHandler.get_lang(interaction.guild_id, "common.errors.cooldown")
+            return await interaction.response.send_message(text.format(sec, "" if sec == 1 else "s"), ephemeral=True)
         
         if isinstance(error, voicelink.VoicelinkException):
             return await interaction.response.send_message(error, ephemeral=True)

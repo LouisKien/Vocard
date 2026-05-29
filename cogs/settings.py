@@ -336,27 +336,47 @@ class Settings(commands.Cog, name="settings"):
         
     @app_commands.command(name="debug")
     async def debug(self, interaction: discord.Interaction):
+        settings = MongoDBHandler.get_cached_settings(interaction.guild_id) if interaction.guild_id else {}
+        lang = settings.get("lang", LangHandler._default_lang)
         if interaction.user.id not in voicelink.Config().bot_access_user:
-            return await interaction.response.send_message("You are not able to use this command!", ephemeral=True)
+            return await interaction.response.send_message(LangHandler._get_lang(lang, "debug.errors.noPermission"), ephemeral=True)
 
         memory = psutil.virtual_memory()
         disk = psutil.disk_usage(func.ROOT_DIR)
 
         available_memory, total_memory = memory.available, memory.total
         used_disk_space, total_disk_space = disk.used, disk.total
-        embed = discord.Embed(title="📄 Debug Panel", color=voicelink.Config().embed_color)
-        embed.description = "```==    System Info    ==\n" \
-                            f"• CPU:     {psutil.cpu_freq().current}Mhz ({psutil.cpu_percent()}%)\n" \
-                            f"• RAM:     {format_bytes(total_memory - available_memory)}/{format_bytes(total_memory, True)} ({memory.percent}%)\n" \
-                            f"• DISK:    {format_bytes(total_disk_space - used_disk_space)}/{format_bytes(total_disk_space, True)} ({disk.percent}%)```"
+        texts = LangHandler._get_lang(
+            lang,
+            "debug.panel.title",
+            "debug.panel.systemInfo",
+            "debug.metrics.cpu",
+            "debug.metrics.ram",
+            "debug.metrics.disk",
+            "debug.panel.botInformation",
+            "debug.metrics.guilds",
+            "debug.metrics.users",
+            "debug.metrics.players",
+            "debug.metrics.address",
+            "debug.metrics.latency",
+            "debug.metrics.uptime",
+            "debug.nodes.connected",
+            "debug.nodes.disconnected",
+            "debug.panel.noExtraData",
+        )
+        embed = discord.Embed(title=texts[0], color=voicelink.Config().embed_color)
+        embed.description = f"```==    {texts[1]}    ==\n" \
+                            f"• {texts[2]}:     {psutil.cpu_freq().current}Mhz ({psutil.cpu_percent()}%)\n" \
+                            f"• {texts[3]}:     {format_bytes(total_memory - available_memory)}/{format_bytes(total_memory, True)} ({memory.percent}%)\n" \
+                            f"• {texts[4]}:    {format_bytes(total_disk_space - used_disk_space)}/{format_bytes(total_disk_space, True)} ({disk.percent}%)```"
 
         embed.add_field(
-            name="🤖 Bot Information",
+            name=texts[5],
             value=f"```• VERSION: {voicelink.Config().version}\n" \
                   f"• LATENCY: {self.bot.latency:.2f}ms\n" \
-                  f"• GUILDS:  {len(self.bot.guilds)}\n" \
-                  f"• USERS:   {sum([guild.member_count or 0 for guild in self.bot.guilds])}\n" \
-                  f"• PLAYERS: {len(self.bot.voice_clients)}```",
+                  f"• {texts[6]}:  {len(self.bot.guilds)}\n" \
+                  f"• {texts[7]}:   {sum([guild.member_count or 0 for guild in self.bot.guilds])}\n" \
+                  f"• {texts[8]}: {len(self.bot.voice_clients)}```",
             inline=False
         )
 
@@ -365,22 +385,22 @@ class Settings(commands.Cog, name="settings"):
             if node._available:
                 total_memory = node.stats.used + node.stats.free
                 embed.add_field(
-                    name=f"{name} Node - 🟢 Connected",
-                    value=f"```• ADDRESS: {node._host}:{node._port}\n" \
-                        f"• PLAYERS: {len(node._players)}\n" \
-                        f"• CPU:     {node.stats.cpu_process_load:.1f}%\n" \
-                        f"• RAM:     {format_bytes(node.stats.free)}/{format_bytes(total_memory, True)} ({(node.stats.free/total_memory) * 100:.1f}%)\n"
-                        f"• LATENCY: {node.latency:.2f}ms\n" \
-                        f"• UPTIME:  {format_ms(node.stats.uptime)}```"
+                    name=f"{name} Node - 🟢 {texts[12]}",
+                    value=f"```• {texts[9]}: {node._host}:{node._port}\n" \
+                        f"• {texts[8]}: {len(node._players)}\n" \
+                        f"• {texts[2]}:     {node.stats.cpu_process_load:.1f}%\n" \
+                        f"• {texts[3]}:     {format_bytes(node.stats.free)}/{format_bytes(total_memory, True)} ({(node.stats.free/total_memory) * 100:.1f}%)\n"
+                        f"• {texts[10]}: {node.latency:.2f}ms\n" \
+                        f"• {texts[11]}:  {format_ms(node.stats.uptime)}```"
                 )
             else:
                 embed.add_field(
-                    name=f"{name} Node - 🔴 Disconnected",
-                    value=f"```• ADDRESS: {node._host}:{node._port}\n" \
-                        f"• PLAYERS: {len(node._players)}\nNo extra data is available for display```",
+                    name=f"{name} Node - 🔴 {texts[13]}",
+                    value=f"```• {texts[9]}: {node._host}:{node._port}\n" \
+                        f"• {texts[8]}: {len(node._players)}\n{texts[14]}```",
                 )
 
-        await interaction.response.send_message(embed=embed, view=DebugView(self.bot), ephemeral=True)
+        await interaction.response.send_message(embed=embed, view=DebugView(self.bot, lang), ephemeral=True)
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Settings(bot))

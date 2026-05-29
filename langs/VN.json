@@ -2,12 +2,14 @@
     "common": {
         "errors": {
             "unknown": "⚠️ Đã xảy ra lỗi khi chạy lệnh! Vui lòng thử lại sau hoặc vào server Discord của chúng tôi để được hỗ trợ.",
-            "missingIntents": "Xin lỗi, lệnh này không thể thực hiện vì bot thiếu quyền yêu cầu cần thiết: `({0})`."
+            "missingIntents": "Xin lỗi, lệnh này không thể thực hiện vì bot thiếu quyền yêu cầu cần thiết: `({0})`.",
+            "cooldown": "Bạn đang trong thời gian chờ {0} giây{1}!"
         },
         "status": {
             "enabled": "đã bật",
             "disabled": "đã tắt",
-            "live": "TRỰC TIẾP"
+            "live": "TRỰC TIẾP",
+            "none": "Không có"
         }
     },
     "player": {
@@ -125,7 +127,7 @@
             "duplicateTrackToggled": "Bây giờ bạn đã `{0}` tính năng ngăn chặn bài hát trùng lặp.",
             "controllerMsgToggled": "Bây giờ bạn đã `{0}` tin nhắn từ bộ điều khiển nhạc.",
             "silentMsgToggled": "Bạn có {0} tin nhắn im lặng.",
-            "resetDone": "Reset `{0}` to server defaults.",
+            "resetDone": "Đã đặt lại `{0}` về mặc định của máy chủ.",
             "resetNotFound": "Tên cài đặt không hợp lệ. Vui lòng sử dụng một trong các tùy chọn sau: {0}"
         },
         "menu": "Cài Đặt Máy Chủ | {0}",
@@ -167,7 +169,11 @@
             "permsValue2": "📖 Đọc: {0}",
             "trackList": "Bài Hát",
             "footer2": "Tổng thời gian: {0}",
-            "playlistSelect": "Chọn một danh sách phát để xem ..."
+            "playlistSelect": "Chọn một danh sách phát để xem ...",
+            "shareTitle": "Chia sẻ playlist",
+            "shareUserLabel": "Người dùng được chia sẻ",
+            "shareUserDescription": "Chọn người dùng để chia sẻ cùng",
+            "shareUserPlaceholder": "Chọn người dùng để chia sẻ cùng"
         },
         "errors": {
             "notFound": "Không tìm thấy playlist [`{0}`]. Gõ /playlist view để xem tất cả playlist của bạn.",
@@ -210,6 +216,208 @@
         "inbox": {
             "full": "Xin lỗi! Hộp thư của {0} đã đầy.",
             "noMessages": "Không có tin nhắn nào trong hộp thư của bạn."
+        },
+        "permissions": {
+            "granted": "Đã cấp quyền **{1}** cho {0} đối với playlist [`{2}`].",
+            "revoked": "Đã thu hồi quyền **{1}** của {0} đối với playlist [`{2}`].",
+            "alreadyGranted": "{0} đã có quyền **{1}** cho playlist này.",
+            "notGranted": "{0} chưa có quyền **{1}** cho playlist này.",
+            "cannotModifySelf": "Bạn không thể tự thay đổi quyền của chính mình.",
+            "invalidPermission": "Loại quyền không hợp lệ. Chỉ chấp nhận: read, write hoặc remove.",
+            "invalidAction": "Hành động không hợp lệ. Chỉ chấp nhận: grant hoặc revoke."
+        }
+    },
+    "help": {
+        "menu": {
+            "title": "Menu trợ giúp của {0}",
+            "selectPlaceholder": "Chọn danh mục!",
+            "availableCategories": "Danh mục hiện có: [{0}]",
+            "informationTitle": "📰 Thông tin:",
+            "informationBody": "{0} là bot nhạc đơn giản, dễ dùng và thân thiện. Bot hỗ trợ SoundCloud, Spotify, Twitch và nhiều nguồn khác.",
+            "getStartedTitle": "Bắt đầu",
+            "getStartedBody": "Vào một kênh thoại rồi dùng /play {Bài hát/URL} để phát nhạc. Bot hỗ trợ tên bài, link video và link playlist trên {0}.",
+            "categoryTitle": "Danh mục: {0}",
+            "commandsTitle": "Lệnh {0}: [{1}]",
+            "tutorialBody": "Cách dùng Vocard? Hãy xem video này để nắm các lệnh và thao tác cơ bản.",
+            "news": "Tin mới",
+            "tutorial": "Hướng dẫn"
+        },
+        "buttons": {
+            "website": "Trang web",
+            "documentation": "Tài liệu",
+            "github": "GitHub",
+            "donate": "Ủng hộ"
+        },
+        "categoryDescriptions": {
+            "news": "Xem các cập nhật mới của Vocard.",
+            "tutorial": "Cách sử dụng Vocard.",
+            "basic": "Danh mục này dành cho mọi thành viên trong máy chủ. Một số lệnh sẽ yêu cầu bình chọn.",
+            "effect": "Danh mục này chỉ dành cho DJ trong máy chủ.",
+            "playlist": "Quản lý playlist đã lưu và playlist được chia sẻ.",
+            "settings": "Danh mục này chỉ dành cho quản trị viên của máy chủ.",
+            "task": "Các tác vụ nền và tiện ích tự động."
+        },
+        "categoryLabels": {
+            "basic": "Cơ bản",
+            "effect": "Hiệu ứng",
+            "playlist": "Playlist",
+            "settings": "Cài đặt",
+            "task": "Tác vụ"
+        }
+    },
+    "debug": {
+        "errors": {
+            "noPermission": "Bạn không được phép dùng lệnh này!",
+            "reloadFailed": "Không thể tải lại `{0}`! Lý do: {1}",
+            "nodeNotFound": "Không tìm thấy node.",
+            "invalidNodeInput": "Một số dữ liệu bạn nhập không hợp lệ. Vui lòng thử lại.",
+            "selectNodeFirst": "Vui lòng chọn một node trước."
+        },
+        "panel": {
+            "title": "📄 Bảng điều khiển debug",
+            "systemInfo": "Thông tin hệ thống",
+            "botInformation": "🤖 Thông tin bot",
+            "nodesTitle": "📡 Bảng điều khiển node",
+            "noNodesConnected": "Hiện không có node nào được kết nối!",
+            "noExtraData": "Không có thêm dữ liệu để hiển thị."
+        },
+        "metrics": {
+            "address": "ĐỊA CHỈ",
+            "players": "TRÌNH PHÁT",
+            "cpu": "CPU",
+            "ram": "RAM",
+            "latency": "ĐỘ TRỄ",
+            "uptime": "THỜI GIAN CHẠY",
+            "disk": "ĐĨA",
+            "guilds": "MÁY CHỦ",
+            "users": "NGƯỜI DÙNG"
+        },
+        "buttons": {
+            "command": "Lệnh",
+            "cogs": "Cogs",
+            "resync": "Đồng bộ lại",
+            "nodes": "Nodes",
+            "stopBot": "Dừng bot",
+            "end": "Kết thúc",
+            "rerun": "Chạy lại",
+            "error": "Lỗi",
+            "add": "Thêm",
+            "remove": "Xóa",
+            "reconnect": "Kết nối lại",
+            "connect": "Kết nối",
+            "disconnect": "Ngắt kết nối"
+        },
+        "cogs": {
+            "open": "Tải lại cogs",
+            "selectPlaceholder": "Chọn cog cần tải lại...",
+            "all": "Tất cả",
+            "allDescription": "Toàn bộ cogs",
+            "reloadSuccess": "Đã tải lại `{0}` thành công!"
+        },
+        "sync": {
+            "start": "Đang đồng bộ toàn bộ lệnh và cài đặt ngôn ngữ...",
+            "done": "Đã đồng bộ toàn bộ lệnh và cài đặt thành công."
+        },
+        "nodes": {
+            "selectPlaceholder": "Chọn node cần quản lý...",
+            "connected": "Đã kết nối",
+            "disconnected": "Đã ngắt kết nối",
+            "connectedMessage": "Node `{0}` đã kết nối!",
+            "removed": "Đã xóa node `{0}` khỏi bot."
+        },
+        "execute": {
+            "title": "Nhập đoạn mã của bạn",
+            "label": "Chạy mã",
+            "placeholder": "Nhập đoạn mã cần chạy"
+        },
+        "modals": {
+            "createNodeTitle": "Tạo node",
+            "hostLabel": "Host",
+            "hostPlaceholder": "Nhập host Lavalink, ví dụ 0.0.0.0",
+            "portLabel": "Port",
+            "portPlaceholder": "Nhập port Lavalink, ví dụ 2333",
+            "passwordLabel": "Mật khẩu",
+            "passwordPlaceholder": "Nhập mật khẩu Lavalink",
+            "secureLabel": "Bảo mật",
+            "securePlaceholder": "Cho biết Lavalink có dùng SSL không. Nhập 'true' hoặc 'false'",
+            "identifierLabel": "Định danh",
+            "identifierPlaceholder": "Nhập tên cho máy chủ Lavalink"
+        }
+    },
+    "embedBuilder": {
+        "dropdown": {
+            "placeholder": "Chọn embed cần chỉnh sửa...",
+            "active": "Đang hoạt động",
+            "activeDescription": "Embed controller khi đang phát nhạc",
+            "inactive": "Không hoạt động",
+            "inactiveDescription": "Embed controller khi không phát nhạc"
+        },
+        "buttons": {
+            "editContent": "Sửa nội dung",
+            "editAuthor": "Sửa tác giả",
+            "editImage": "Sửa ảnh",
+            "editFooter": "Sửa chân trang",
+            "addField": "Thêm trường",
+            "removeField": "Xóa trường",
+            "apply": "Áp dụng",
+            "reset": "Đặt lại"
+        },
+        "errors": {
+            "maxFields": "Bạn đã đạt số trường tối đa!",
+            "emptyFields": "Không có trường nào để xóa!",
+            "fieldNotFound": "Không tìm thấy trường cần xóa."
+        },
+        "modals": {
+            "editContentTitle": "Sửa nội dung",
+            "titleLabel": "Tiêu đề",
+            "titlePlaceholder": "Tiêu đề của embed",
+            "urlLabel": "URL",
+            "urlPlaceholder": "Liên kết của tiêu đề",
+            "colorLabel": "Màu sắc",
+            "colorPlaceholder": "Màu embed ở dạng hex",
+            "descriptionLabel": "Mô tả",
+            "descriptionPlaceholder": "Mô tả của embed",
+            "editAuthorTitle": "Sửa tác giả",
+            "nameLabel": "Tên",
+            "namePlaceholder": "Tên tác giả",
+            "authorUrlPlaceholder": "Liên kết của tác giả",
+            "iconUrlLabel": "URL biểu tượng",
+            "iconUrlPlaceholder": "Liên kết biểu tượng",
+            "editImageTitle": "Sửa ảnh",
+            "thumbnailLabel": "Thumbnail",
+            "thumbnailPlaceholder": "Liên kết thumbnail",
+            "imageLabel": "Ảnh",
+            "imagePlaceholder": "Liên kết ảnh",
+            "editFooterTitle": "Sửa chân trang",
+            "textLabel": "Văn bản",
+            "textPlaceholder": "Nội dung chân trang",
+            "addFieldTitle": "Thêm trường",
+            "valueLabel": "Giá trị",
+            "valuePlaceholder": "Giá trị của trường",
+            "inlineLabel": "Inline",
+            "inlinePlaceholder": "Trường này có hiển thị inline không, ví dụ true hoặc false",
+            "removeFieldTitle": "Xóa trường",
+            "indexLabel": "Vị trí",
+            "indexPlaceholder": "Số thứ tự trường cần xóa, ví dụ 1"
+        }
+    },
+    "inbox": {
+        "title": "📭 Hộp thư của {0}",
+        "selectPlaceholder": "Chọn tin nhắn để xem...",
+        "maxMessages": "Số tin tối đa: {0}/10",
+        "headers": "ID:,Tiêu đề:",
+        "messageInfo": "Thông tin tin nhắn:",
+        "senderId": "ID người gửi",
+        "playlistId": "ID playlist",
+        "inviteTime": "Thời gian mời",
+        "buttons": {
+            "accept": "Chấp nhận",
+            "dismiss": "Bỏ qua",
+            "save": "Lưu thay đổi"
+        },
+        "types": {
+            "invite": "Lời mời",
+            "notification": "Thông báo"
         }
     },
     "search": {
@@ -261,7 +469,8 @@
         "delete": "Xóa",
         "page": {
             "title": "Nhập số trang",
-            "field": "Số trang"
+            "field": "Số trang",
+            "placeholder": "ví dụ 1"
         }
     }
 }

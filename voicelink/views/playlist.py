@@ -170,16 +170,23 @@ class PlaylistView(PaginationView):
     
     @discord.ui.button(label="Share", custom_id="share", style=discord.ButtonStyle.gray)
     async def share(self, interaction: discord.Interaction[commands.Bot], button: discord.ui.Button) -> None:
+        texts = LangHandler._get_lang(
+            self.primary_view.lang,
+            "playlist.view.shareTitle",
+            "playlist.view.shareUserLabel",
+            "playlist.view.shareUserDescription",
+            "playlist.view.shareUserPlaceholder",
+        )
         modal = BaseModal(
-            title="Share Playlist",
+            title=texts[0],
             custom_id="share_modal",
             items=[
                 discord.ui.Label(
-                    text="User to share with",
-                    description="Select a user to share with",
+                    text=texts[1],
+                    description=texts[2],
                     component=discord.ui.UserSelect(
                         custom_id="user_select",
-                        placeholder="Select a user to share with",
+                        placeholder=texts[3],
                         required=True
                     ),
                 )

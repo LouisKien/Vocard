@@ -91,7 +91,7 @@ class PaginationView(discord.ui.View):
     @discord.ui.button(label="--/--", custom_id="page_number", style=discord.ButtonStyle.blurple)
     async def page_number(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         """Display current page number."""
-        texts = LangHandler._get_lang(self.lang, "pagination.page.title", "pagination.page.field")
+        texts = LangHandler._get_lang(self.lang, "pagination.page.title", "pagination.page.field", "pagination.page.placeholder")
         modal = BaseModal(
             title=texts[0],
             custom_id="page_number_modal",
@@ -99,7 +99,7 @@ class PaginationView(discord.ui.View):
                 discord.ui.TextInput(
                     label=texts[1],
                     custom_id="page_number",
-                    placeholder="e.g. 1",
+                    placeholder=texts[2],
                     default=str(self.pagination.current_page),
                     max_length=5,
                     required=True

@@ -2,12 +2,14 @@
     "common": {
         "errors": {
             "unknown": "⚠️ Something wrong while running the command! Please try again later or join our discord server for further support.",
-            "missingIntents": "Sorry, this command cannot be executed because the bot is missing the required request intent: `({0})`."
+            "missingIntents": "Sorry, this command cannot be executed because the bot is missing the required request intent: `({0})`.",
+            "cooldown": "You're on cooldown for {0} second{1}!"
         },
         "status": {
             "enabled": "enabled",
             "disabled": "disabled",
-            "live": "LIVE"
+            "live": "LIVE",
+            "none": "None"
         }
     },
     "player": {
@@ -167,7 +169,11 @@
             "permsValue2": "📖 Read: {0}",
             "trackList": "Tracks",
             "footer2": "Total Duration: {0}",
-            "playlistSelect": "Select a playlist to view ..."
+            "playlistSelect": "Select a playlist to view ...",
+            "shareTitle": "Share Playlist",
+            "shareUserLabel": "User to share with",
+            "shareUserDescription": "Select a user to share with",
+            "shareUserPlaceholder": "Select a user to share with"
         },
         "errors": {
             "notFound": "Playlist [`{0}`] not found. Type /playlist view to view all your playlist.",
@@ -221,6 +227,199 @@
             "invalidAction": "Invalid action. Must be: grant or revoke."
         }
     },
+    "help": {
+        "menu": {
+            "title": "{0} Help Menu",
+            "selectPlaceholder": "Select category!",
+            "availableCategories": "Available Categories: [{0}]",
+            "informationTitle": "📰 Information:",
+            "informationBody": "{0} is a simple music bot. It leads to a comfortable experience which is user-friendly, It supports Soundcloud, Spotify, Twitch and more!",
+            "getStartedTitle": "Get Started",
+            "getStartedBody": "Join a voice channel and /play {Song/URL} a song. (Names, video links, or playlist links are supported on {0})",
+            "categoryTitle": "Category: {0}",
+            "commandsTitle": "{0} Commands: [{1}]",
+            "tutorialBody": "How to use Vocard? Watch this video for the basic commands and flow.",
+            "news": "News",
+            "tutorial": "Tutorial"
+        },
+        "buttons": {
+            "website": "Website",
+            "documentation": "Documentation",
+            "github": "GitHub",
+            "donate": "Donate"
+        },
+        "categoryDescriptions": {
+            "news": "View new updates of Vocard.",
+            "tutorial": "How to use Vocard.",
+            "basic": "This category is available to anyone on this server. Voting is required for some commands.",
+            "effect": "This category is only available to DJs on this server.",
+            "playlist": "Manage saved playlists and shared playlists.",
+            "settings": "This category is only available to administrators on the server.",
+            "task": "Background tasks and automation utilities."
+        },
+        "categoryLabels": {
+            "basic": "Basic",
+            "effect": "Effects",
+            "playlist": "Playlist",
+            "settings": "Settings",
+            "task": "Tasks"
+        }
+    },
+    "debug": {
+        "errors": {
+            "noPermission": "You are not allowed to use this command!",
+            "reloadFailed": "Unable to reload `{0}`! Reason: {1}",
+            "nodeNotFound": "The node could not be found!",
+            "invalidNodeInput": "Some of your input is invalid! Please try again.",
+            "selectNodeFirst": "Please select a node first."
+        },
+        "panel": {
+            "title": "📄 Debug Panel",
+            "systemInfo": "System Info",
+            "botInformation": "🤖 Bot Information",
+            "nodesTitle": "📡 Nodes Panel",
+            "noNodesConnected": "There are no nodes connected!",
+            "noExtraData": "No extra data is available for display."
+        },
+        "metrics": {
+            "address": "ADDRESS",
+            "players": "PLAYERS",
+            "cpu": "CPU",
+            "ram": "RAM",
+            "latency": "LATENCY",
+            "uptime": "UPTIME",
+            "disk": "DISK",
+            "guilds": "GUILDS",
+            "users": "USERS"
+        },
+        "buttons": {
+            "command": "Command",
+            "cogs": "Cogs",
+            "resync": "Re-Sync",
+            "nodes": "Nodes",
+            "stopBot": "Stop Bot",
+            "end": "End",
+            "rerun": "Rerun",
+            "error": "Error",
+            "add": "Add",
+            "remove": "Remove",
+            "reconnect": "Reconnect",
+            "connect": "Connect",
+            "disconnect": "Disconnect"
+        },
+        "cogs": {
+            "open": "Reload cogs",
+            "selectPlaceholder": "Select a cog to reload...",
+            "all": "All",
+            "allDescription": "All cogs",
+            "reloadSuccess": "Reloaded `{0}` successfully!"
+        },
+        "sync": {
+            "start": "Synchronizing all commands and language settings...",
+            "done": "All commands and settings have been synchronized successfully."
+        },
+        "nodes": {
+            "selectPlaceholder": "Select a node to manage...",
+            "connected": "Connected",
+            "disconnected": "Disconnected",
+            "connectedMessage": "Node `{0}` is connected!",
+            "removed": "Removed node `{0}` from the bot."
+        },
+        "execute": {
+            "title": "Enter Your Code",
+            "label": "Code Runner",
+            "placeholder": "Input your code"
+        },
+        "modals": {
+            "createNodeTitle": "Create Node",
+            "hostLabel": "Host",
+            "hostPlaceholder": "Enter the Lavalink host, e.g. 0.0.0.0",
+            "portLabel": "Port",
+            "portPlaceholder": "Enter the Lavalink port, e.g. 2333",
+            "passwordLabel": "Password",
+            "passwordPlaceholder": "Enter the Lavalink password",
+            "secureLabel": "Secure",
+            "securePlaceholder": "Specify whether Lavalink uses SSL. Enter 'true' or 'false'",
+            "identifierLabel": "Identifier",
+            "identifierPlaceholder": "Enter a name for your Lavalink server"
+        }
+    },
+    "embedBuilder": {
+        "dropdown": {
+            "placeholder": "Select an embed to edit...",
+            "active": "Active",
+            "activeDescription": "The controller embed when music is playing",
+            "inactive": "Inactive",
+            "inactiveDescription": "The controller embed when music is not playing"
+        },
+        "buttons": {
+            "editContent": "Edit Content",
+            "editAuthor": "Edit Author",
+            "editImage": "Edit Image",
+            "editFooter": "Edit Footer",
+            "addField": "Add Field",
+            "removeField": "Remove Field",
+            "apply": "Apply",
+            "reset": "Reset"
+        },
+        "errors": {
+            "maxFields": "You have already reached the maximum number of fields!",
+            "emptyFields": "There are no fields to remove!",
+            "fieldNotFound": "Could not find that field."
+        },
+        "modals": {
+            "editContentTitle": "Edit Content",
+            "titleLabel": "Title",
+            "titlePlaceholder": "The embed title",
+            "urlLabel": "URL",
+            "urlPlaceholder": "The title URL",
+            "colorLabel": "Color",
+            "colorPlaceholder": "The embed color in hex",
+            "descriptionLabel": "Description",
+            "descriptionPlaceholder": "The embed description",
+            "editAuthorTitle": "Edit Author",
+            "nameLabel": "Name",
+            "namePlaceholder": "The author name",
+            "authorUrlPlaceholder": "The author URL",
+            "iconUrlLabel": "Icon URL",
+            "iconUrlPlaceholder": "The icon URL",
+            "editImageTitle": "Edit Image",
+            "thumbnailLabel": "Thumbnail",
+            "thumbnailPlaceholder": "The thumbnail URL",
+            "imageLabel": "Image",
+            "imagePlaceholder": "The image URL",
+            "editFooterTitle": "Edit Footer",
+            "textLabel": "Text",
+            "textPlaceholder": "The footer text",
+            "addFieldTitle": "Add Field",
+            "valueLabel": "Value",
+            "valuePlaceholder": "The field value",
+            "inlineLabel": "Inline",
+            "inlinePlaceholder": "Whether the field is inline, e.g. true or false",
+            "removeFieldTitle": "Remove Field",
+            "indexLabel": "Index",
+            "indexPlaceholder": "The field number to remove, e.g. 1"
+        }
+    },
+    "inbox": {
+        "title": "📭 {0}'s Inbox",
+        "selectPlaceholder": "Select a message to view...",
+        "maxMessages": "Max messages: {0}/10",
+        "headers": "ID:,Title:",
+        "messageInfo": "Message Info:",
+        "senderId": "Sender ID",
+        "playlistId": "Playlist ID",
+        "inviteTime": "Invite Time",
+        "buttons": {
+            "accept": "Accept",
+            "dismiss": "Dismiss",
+            "save": "Save Changes"
+        },
+        "types": {
+            "invite": "Invitation",
+            "notification": "Notification"
+        }
+    },
     "search": {
         "noLinkSupport": "Search command does not support links!",
         "title": "Search Query: {0}",
@@ -270,7 +469,8 @@
         "delete": "Delete",
         "page": {
             "title": "Enter Page Number",
-            "field": "Page Number"
+            "field": "Page Number",
+            "placeholder": "e.g. 1"
         }
     }
 }
