@@ -58,21 +58,10 @@ class IPCClient:
                 if not self._is_connected:
                     try:
                         await self.connect()
-                    except Exception as e:
+                    except Exception:
                         self._logger.error("Reconnection failed.")
             else:
                 self._bot.loop.create_task(process_methods(self, self._bot, msg.json()))
-
-    async def send(self, data: dict):
-        if self.is_connected:
-            try:
-                await self._websocket.send_json(data)
-                self._logger.debug(f"Send Message: {data}")
-            except ConnectionResetError as _:
-                await self.disconnect()
-                await self.connect()
-                await self._websocket.send_json(data)
-                self._logger.debug(f"Send Message: {data}")
 
     async def send(self, data: dict):
         # Check if the websocket is still open
@@ -122,7 +111,7 @@ class IPCClient:
         except aiohttp.ClientConnectorError:
             raise Exception("Connection failed.")
             
-        except aiohttp.WSServerHandshakeError as e:
+        except aiohttp.WSServerHandshakeError:
             self._logger.error("Access forbidden: Missing bot ID, version mismatch, or invalid password.")
             
         except Exception as e:

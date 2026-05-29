@@ -291,6 +291,8 @@ def test_env_example_contains_homelab_contract() -> None:
         "MONGO_IMAGE",
         "MONGO_INITDB_ROOT_USERNAME",
         "MONGO_INITDB_ROOT_PASSWORD",
+        "MONGODB_MAX_POOL_SIZE",
+        "MONGODB_MIN_POOL_SIZE",
         "MONGODB_URL",
         "MONGODB_NAME",
         "LAVALINK_HOST",

@@ -1,1 +1,1 @@
-from .client import IPCClient
+from .client import IPCClient as IPCClient

@@ -265,7 +265,7 @@ class Node:
             json=data
         ) as resp:
             if resp.status >= 300:
-                raise NodeException(f"Getting errors from Lavalink REST api")
+                raise NodeException("Getting errors from Lavalink REST api")
             
             if method == RequestMethod.DELETE:
                 return await resp.json(content_type=None)
@@ -480,7 +480,7 @@ class Node:
             json={"refreshToken": token.token}
         ) as resp:
             if resp.status >= 300:
-                raise NodeException(f"Getting errors from Lavalink REST api")
+                raise NodeException("Getting errors from Lavalink REST api")
 
 class NodePool:
     """The base class for the node pool.

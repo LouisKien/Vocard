@@ -30,6 +30,7 @@ import base64
 import json
 import urllib.parse
 
+from bs4 import BeautifulSoup
 from math import floor
 from urllib.parse import quote
 from abc import ABC, abstractmethod
@@ -191,7 +192,7 @@ class A_ZLyrics(LyricsPlatform):
         return (match/ len1 + match / len2 + (match - t + 1) / match)/ 3.0
 
     def htmlFindAll(self, page) -> list:
-        soup = bs4.BeautifulSoup(page, "html.parser")
+        soup = BeautifulSoup(page, "html.parser")
         return soup.findAll
 
     def clearText(self, text: str) -> str:

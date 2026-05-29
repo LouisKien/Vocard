@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 from cogs.listeners import sanitize_track_exception_message
 from voicelink.language import LangHandler
+from voicelink.lyrics import A_ZLyrics
 from voicelink.player import Player
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -51,6 +52,28 @@ def test_player_human_member_check_ignores_undeafened_bots() -> None:
 
     assert Player._has_human_members([bot_member]) is False
     assert Player._has_human_members([bot_member, human_member]) is True
+
+
+def test_azlyrics_html_parser_is_imported() -> None:
+    find_all = A_ZLyrics().htmlFindAll("<html><b>Song</b></html>")
+
+    assert find_all("b")[0].text == "Song"
+
+
+def test_ipc_client_has_single_send_method() -> None:
+    ipc_source = (ROOT / "voicelink" / "ipc" / "client.py").read_text(encoding="utf8")
+    module = ast.parse(ipc_source)
+    ipc_client = next(
+        node
+        for node in ast.walk(module)
+        if isinstance(node, ast.ClassDef) and node.name == "IPCClient"
+    )
+    send_methods = [
+        node for node in ipc_client.body
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "send"
+    ]
+
+    assert len(send_methods) == 1
 
 
 def test_default_language_is_vietnamese() -> None:

@@ -25,6 +25,7 @@ import copy
 import time
 import asyncio
 import logging
+import os
 
 from typing import Any, Dict, Optional, Literal, TypedDict, List
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection
@@ -32,6 +33,12 @@ from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection
 from .config import Config
 
 logger: logging.Logger = logging.getLogger("vocard.db")
+
+def _get_int_env(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value in (None, ""):
+        return default
+    return int(value)
 
 # Type definitions for better code clarity
 class PlaylistPerms(TypedDict):
@@ -122,8 +129,8 @@ class MongoDBHandler:
             try:
                 cls._client = AsyncIOMotorClient(
                     uri,
-                    maxPoolSize=50,
-                    minPoolSize=5,
+                    maxPoolSize=_get_int_env("MONGODB_MAX_POOL_SIZE", 10),
+                    minPoolSize=_get_int_env("MONGODB_MIN_POOL_SIZE", 0),
                     maxIdleTimeMS=60000,
                     retryWrites=True
                 )

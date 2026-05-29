@@ -38,6 +38,7 @@ Fill these in `.env` before production use:
 - `SERVER_ID`: the only Discord guild this bot will serve. Legacy `DISCORD_GUILD_ID` is still accepted.
 - `MONGO_IMAGE`: defaults to `mongo:4.4.29-focal` for Intel N4100 and other non-AVX CPUs.
 - `MONGO_INITDB_ROOT_USERNAME`, `MONGO_INITDB_ROOT_PASSWORD`, `MONGODB_URL`, `MONGODB_NAME`.
+- `MONGODB_MAX_POOL_SIZE`, `MONGODB_MIN_POOL_SIZE`: default to `10` and `0` for a small single-guild homelab.
 - `LAVALINK_HOST`, `LAVALINK_PORT`, `LAVALINK_PASSWORD`.
 - `LAVASRC_SPOTIFY_CLIENT_ID`, `LAVASRC_SPOTIFY_CLIENT_SECRET`.
 
