@@ -378,6 +378,41 @@ class Node:
         return query.strip()
 
     @staticmethod
+    def _truncate_log_value(value: Any, limit: int = 600) -> str:
+        text = repr(value)
+        return text if len(text) <= limit else text[: limit - 3] + "..."
+
+    def _log_track_lookup_failure(
+        self,
+        *,
+        query: str,
+        requester: Member,
+        search_type: SearchType,
+        response: Any = None,
+        error: Optional[Exception] = None,
+    ) -> None:
+        if not self._logger:
+            return
+
+        response_text = (
+            self._truncate_log_value(response)
+            if response is not None else "n/a"
+        )
+        error_text = f" error={error!r}" if error else ""
+        exc_info = (type(error), error, error.__traceback__) if error else None
+
+        self._logger.error(
+            "Track lookup failed on node [%s] for requester %s with search_type=%s and query=%r. response=%s%s",
+            self._identifier,
+            getattr(requester, "id", "unknown"),
+            getattr(search_type, "name", str(search_type)),
+            query,
+            response_text,
+            error_text,
+            exc_info=exc_info,
+        )
+
+    @staticmethod
     def _spotify_partner_api_for_query(query: str) -> Optional[bool]:
         match = SPOTIFY_URL_REGEX.match(query)
         if not match:
@@ -436,19 +471,53 @@ class Node:
 
         prefer_partner_api = self._spotify_partner_api_for_query(query)
         if prefer_partner_api is not None:
-            await self._set_lavasrc_spotify_partner_api(prefer_partner_api)
+            try:
+                await self._set_lavasrc_spotify_partner_api(prefer_partner_api)
+            except Exception as error:
+                self._log_track_lookup_failure(
+                    query=query,
+                    requester=requester,
+                    search_type=search_type,
+                    error=error,
+                )
+                raise
 
-        response: dict[str, Any] = await self.send(RequestMethod.GET, f"loadtracks?identifier={quote(query)}")
+        try:
+            response: dict[str, Any] = await self.send(
+                RequestMethod.GET,
+                f"loadtracks?identifier={quote(query)}",
+            )
+        except Exception as error:
+            self._log_track_lookup_failure(
+                query=query,
+                requester=requester,
+                search_type=search_type,
+                error=error,
+            )
+            raise
+
         data = response.get("data")
         load_type = response.get("loadType")
 
         if not load_type:
+            self._log_track_lookup_failure(
+                query=query,
+                requester=requester,
+                search_type=search_type,
+                response=response,
+            )
             raise TrackLoadError("There was an error while trying to load this track.")
         
         elif load_type == "empty":
             return None
 
         elif load_type == "error":
+            self._log_track_lookup_failure(
+                query=query,
+                requester=requester,
+                search_type=search_type,
+                response=response,
+            )
             raise TrackLoadError(f"{data['message']} [{data['severity']}]")
 
         elif load_type in ("playlist", "recommendations"):
