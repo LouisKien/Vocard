@@ -27,7 +27,6 @@ import time, logging, asyncio
 
 from math import ceil
 from random import shuffle, choice
-from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Union, Tuple, TYPE_CHECKING
 
 from discord import (
@@ -49,7 +48,6 @@ from . import events
 from .config import Config
 from .pool import Node, NodePool
 from .objects import Track, Playlist
-from .spotify_fastpath import SpotifyPlaylistSeed, trim_seeded_track_from_playlist
 from .filters import Filter, Filters
 from .enums import SearchType, LoopType, RequestMethod
 from .events import VoicelinkEvent, TrackEndEvent, TrackStartEvent, TrackExceptionEvent
@@ -59,7 +57,7 @@ from .queue import Queue, QUEUE_TYPES
 from .mongodb import MongoDBHandler
 from .language import LangHandler
 from .views import InteractiveController
-from .utils import TempCtx, format_ms, dispatch_message, send_localized_message
+from .utils import format_ms, dispatch_message
 
 if TYPE_CHECKING:
     from .ipc import IPCClient
@@ -403,7 +401,6 @@ class Player(VoiceProtocol):
 
     async def do_next(self):
         """Processes the next track in the queue."""
-        started_at = time.perf_counter()
         if self._current or self.is_playing or not self.channel:
             return
         
@@ -446,19 +443,11 @@ class Player(VoiceProtocol):
                 )
 
         self._schedule_post_playback_updates(track)
-        self._log_stage_timing(
-            "do_next_ms",
-            started_at,
-            threshold_ms=400,
-            track_id=getattr(track, "identifier", None),
-            source=getattr(track, "source", None),
-        )
 
     async def invoke_controller(self):
         """Sends or updates the music controller message in the designated channel."""
         if not self.settings.get('controller', True) or self._updating or not self.channel:
             return
-        started_at = time.perf_counter()
         self._updating = True
 
         try:            
@@ -495,7 +484,6 @@ class Player(VoiceProtocol):
         
         finally:
             self._updating = False
-            self._log_stage_timing("controller_update_ms", started_at, threshold_ms=200)
 
     async def is_position_fresh(self):
         """Checks if the current controller message is among the most recent messages."""
@@ -510,7 +498,6 @@ class Player(VoiceProtocol):
     
     async def teardown(self):
         """Cleans up the player and associated resources."""
-        started_at = time.perf_counter()
         self._cancel_inactive_cleanup_timer()
         controller = self.controller
         sticky_controller_id = self.settings.get("music_request_channel", {}).get("controller_msg_id")
@@ -536,8 +523,6 @@ class Player(VoiceProtocol):
             await self.destroy()
         except:
             pass
-        finally:
-            self._log_stage_timing("teardown_ms", started_at, threshold_ms=250)
 
     async def get_tracks(
         self,
@@ -567,10 +552,8 @@ class Player(VoiceProtocol):
             
     async def stop(self):
         """Stops the currently playing track."""
-        started_at = time.perf_counter()
         self._current = None
         await self.send(method=RequestMethod.PATCH, data={'encodedTrack': None})
-        self._log_stage_timing("stop_request_ms", started_at, threshold_ms=150)
 
     async def disconnect(self, *, force: bool = False):
         """Disconnects the player from voice."""
@@ -607,7 +590,6 @@ class Player(VoiceProtocol):
         """Plays a track."""
         if not self._node:
             return track
-        started_at = time.perf_counter()
 
         data = {
             "encodedTrack": track.track_id,
@@ -624,13 +606,6 @@ class Player(VoiceProtocol):
         self._current = track
 
         self._logger.debug(f"Player in {self.guild.name}({self.guild.id}) playing {track.title} from uri {track.uri} with a length of {track.length}")
-        self._log_stage_timing(
-            "play_request_ms",
-            started_at,
-            threshold_ms=250,
-            track_id=track.identifier,
-            source=track.source,
-        )
         return self._current
 
     def _validate_time(self, track: Track, start_time: int, end_time: int) -> None:
@@ -658,24 +633,6 @@ class Player(VoiceProtocol):
             task.cancel()
         self._inactive_cleanup_task = None
 
-    def _log_stage_timing(self, stage: str, started_at: float, *, threshold_ms: float = 250, **fields) -> float:
-        elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
-        if not self._logger:
-            return elapsed_ms
-
-        field_text = " ".join(
-            f"{key}={value!r}"
-            for key, value in fields.items()
-            if value not in (None, "", [])
-        )
-        message = f"{stage}={elapsed_ms:.2f}ms guild_id={self.guild.id if self.guild else 'unknown'}"
-        if field_text:
-            message = f"{message} {field_text}"
-
-        log = self._logger.info if elapsed_ms >= threshold_ms else self._logger.debug
-        log(message)
-        return elapsed_ms
-
     def _start_background_task(self, coro, label: str) -> Optional[asyncio.Task]:
         if not self.bot or not getattr(self.bot, "loop", None):
             return None
@@ -686,7 +643,6 @@ class Player(VoiceProtocol):
         return task
 
     async def _run_background_task(self, coro, label: str):
-        started_at = time.perf_counter()
         try:
             return await coro
         except asyncio.CancelledError:
@@ -699,8 +655,6 @@ class Player(VoiceProtocol):
                     self.guild.id if self.guild else "unknown",
                     exc_info=e,
                 )
-        finally:
-            self._log_stage_timing(f"{label}_ms", started_at, threshold_ms=300)
 
     async def _persist_history_entry(self, requester_id: int, track_id: str) -> None:
         await MongoDBHandler.update_user(requester_id, {
@@ -734,59 +688,6 @@ class Player(VoiceProtocol):
         else:
             await controller.delete()
 
-    async def _backfill_spotify_playlist(
-        self,
-        *,
-        message_ctx: TempCtx,
-        query: str,
-        requester: Member,
-        seeded_track: Track,
-        seed: SpotifyPlaylistSeed,
-        anchor_position: int,
-        start_time: int = 0,
-        end_time: int = 0,
-    ) -> None:
-        playlist = await self._node.get_tracks(
-            query,
-            requester=requester,
-            search_type=SearchType.SPOTIFY,
-        )
-        if not isinstance(playlist, Playlist):
-            return
-
-        remaining_tracks = trim_seeded_track_from_playlist(playlist, seeded_track)
-        existing_uris = [] if self.queue._allow_duplicate else [track.uri for track in self.queue._queue]
-        inserted_tracks: list[Track] = []
-        next_position = anchor_position
-        for track in remaining_tracks:
-            if not self.queue._allow_duplicate and track.uri in existing_uris:
-                continue
-
-            self._validate_time(track, start_time, end_time)
-            self.queue.put_at_index(next_position, track)
-            inserted_tracks.append(track)
-            existing_uris.append(track.uri)
-            next_position += 1
-
-        if inserted_tracks and self.is_ipc_connected:
-            await self.send_ws(
-                {
-                    "op": "addTrack",
-                    "tracks": [track.track_id for track in inserted_tracks],
-                    "position": anchor_position,
-                },
-                requester,
-            )
-
-        await send_localized_message(
-            message_ctx,
-            "player.playback.playlistLoad",
-            playlist.name or seed.name,
-            playlist.track_count or seed.track_count,
-            settings=self.settings,
-        )
-        await self.invoke_controller()
-
     def _schedule_post_playback_updates(self, track: Optional[Track]) -> None:
         self._start_background_task(self.invoke_controller(), "controller_side_effect")
         self._start_background_task(self.update_voice_status(), "voice_status_side_effect")
@@ -801,78 +702,6 @@ class Player(VoiceProtocol):
     @staticmethod
     def _has_human_members(members) -> bool:
         return any(not member.bot for member in members)
-
-    async def try_start_spotify_playlist_fast(
-        self,
-        ctx: Union[commands.Context, Interaction, TempCtx],
-        query: str,
-        requester: Member,
-        *,
-        start_time: int = 0,
-        end_time: int = 0,
-        at_front: bool = False,
-    ):
-        if not self._node:
-            return None
-
-        seed: Optional[SpotifyPlaylistSeed] = await self._node.get_spotify_playlist_seed(query)
-        if not seed:
-            return None
-
-        try:
-            tracks = await self._node.get_tracks(
-                seed.first_track_url,
-                requester=requester,
-                search_type=SearchType.SPOTIFY,
-            )
-        except Exception as error:
-            if self._logger:
-                self._logger.warning(
-                    "Spotify fast-path first-track lookup failed for guild_id=%s query=%r",
-                    self.guild.id if self.guild else "unknown",
-                    query,
-                    exc_info=error,
-                )
-            return None
-
-        if not tracks or isinstance(tracks, Playlist):
-            return None
-
-        first_track = tracks[0]
-        queue_position = await self.add_track(
-            first_track,
-            start_time=start_time,
-            end_time=end_time,
-            at_front=at_front,
-        )
-
-        started_playback = False
-        if not self.is_playing:
-            await self.do_next()
-            started_playback = True
-
-        anchor_position = 1 if started_playback else queue_position + 1
-        message_ctx = ctx if isinstance(ctx, TempCtx) else TempCtx(author=requester, channel=ctx.channel)
-        self._start_background_task(
-            self._backfill_spotify_playlist(
-                message_ctx=message_ctx,
-                query=query,
-                requester=requester,
-                seeded_track=first_track,
-                seed=seed,
-                anchor_position=anchor_position,
-                start_time=start_time,
-                end_time=end_time,
-            ),
-            "spotify_playlist_backfill",
-        )
-
-        return SimpleNamespace(
-            first_track=first_track,
-            queue_position=0 if started_playback else queue_position,
-            playlist_name=seed.name,
-            track_count=seed.track_count,
-        )
 
     def _schedule_inactive_cleanup_timer(self) -> None:
         """Schedules per-player cleanup after inactivity."""
@@ -949,7 +778,6 @@ class Player(VoiceProtocol):
 
     async def set_pause(self, pause: bool, requester: Member = None) -> bool:
         """Sets the pause state of the currently playing track."""
-        started_at = time.perf_counter()
         self._paused = pause
         self.pause_votes.clear() if pause else self.resume_votes.clear()
         await self.send(method=RequestMethod.PATCH, data={"paused": pause})
@@ -958,7 +786,6 @@ class Player(VoiceProtocol):
             await self.send_ws({"op": "updatePause", "pause": pause}, requester)
         
         self._logger.debug(f"Player in {self.guild.name}({self.guild.id}) has been {'paused' if pause else 'resumed'}.")
-        self._log_stage_timing("pause_request_ms", started_at, threshold_ms=150, pause=pause)
         return self._paused
 
     async def set_volume(self, volume: int, requester: Member = None) -> int:
@@ -1138,7 +965,6 @@ class Player(VoiceProtocol):
         template = self.settings.get("stage_announce_template", Config().voice_status_template)
         if not template or not self.channel:
             return
-        started_at = time.perf_counter()
         try:
             rv = {key: func() if callable(func) else func for key, func in self._ph.variables.items()}
             status = None if remove_status else self._ph.replace(text=template, variables=rv)
@@ -1162,8 +988,6 @@ class Player(VoiceProtocol):
                 f"({self.channel.guild.id})", 
                 exc_info=e
             )
-        finally:
-            self._log_stage_timing("voice_status_ms", started_at, threshold_ms=200, remove_status=remove_status)
 
     async def send_ws(self, payload, requester: Member = None):
         """Sends a WebSocket payload to the bot's IPC (Inter-Process Communication) system."""

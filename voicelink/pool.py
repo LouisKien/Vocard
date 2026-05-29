@@ -48,7 +48,6 @@ from .exceptions import (
     TrackLoadError
 )
 from .objects import Playlist, Track
-from .spotify_fastpath import SpotifyFastPathClient
 from .utils import ExponentialBackoff, NodeStats, NodeInfo, Ping
 from .enums import RequestMethod
 from .ratelimit import YTRatelimit, YTToken, STRATEGY
@@ -120,7 +119,6 @@ class Node:
         self._info: Optional[NodeInfo] = None
         self._lavasrc_spotify_partner_api: Optional[bool] = None
         self._lavasrc_spotify_config_lock = asyncio.Lock()
-        self._spotify_fastpath = SpotifyFastPathClient(self._session, logger=self._logger)
         
         self.yt_ratelimit: Optional[YTRatelimit] = STRATEGY.get(yt_ratelimit.get("strategy"))(self, yt_ratelimit) if yt_ratelimit and yt_ratelimit.get("tokens") else None
 
@@ -414,30 +412,6 @@ class Node:
             exc_info=exc_info,
         )
 
-    def _log_track_lookup_timing(
-        self,
-        *,
-        query: str,
-        requester: Member,
-        search_type: SearchType,
-        started_at: float,
-        load_type: Optional[str] = None,
-    ) -> None:
-        if not self._logger:
-            return
-
-        elapsed_ms = round((asyncio.get_running_loop().time() - started_at) * 1000, 2)
-        log = self._logger.info if elapsed_ms >= 750 else self._logger.debug
-        log(
-            "lookup_ms=%.2f node=%s requester=%s search_type=%s load_type=%s query=%r",
-            elapsed_ms,
-            self._identifier,
-            getattr(requester, "id", "unknown"),
-            getattr(search_type, "name", str(search_type)),
-            load_type or "unknown",
-            query,
-        )
-
     @staticmethod
     def _spotify_partner_api_for_query(query: str) -> Optional[bool]:
         match = SPOTIFY_URL_REGEX.match(query)
@@ -475,19 +449,6 @@ class Node:
 
             self._lavasrc_spotify_partner_api = enabled
 
-    async def get_spotify_playlist_seed(self, query: str):
-        try:
-            return await self._spotify_fastpath.get_playlist_seed(query)
-        except Exception as error:
-            if self._logger:
-                self._logger.warning(
-                    "Spotify fast-path seed lookup failed on node [%s] for query=%r",
-                    self._identifier,
-                    query,
-                    exc_info=error,
-                )
-            return None
-
     async def get_tracks(
         self,
         query: str,
@@ -501,7 +462,6 @@ class Node:
         You can also pass in a discord.py Context object to get a
         Context object on any track you search.
         """
-        started_at = asyncio.get_running_loop().time()
         query = self._normalize_query(query)
         if not search_type:
             search_type = Config().search_platform
@@ -538,13 +498,6 @@ class Node:
 
         data = response.get("data")
         load_type = response.get("loadType")
-        self._log_track_lookup_timing(
-            query=query,
-            requester=requester,
-            search_type=search_type,
-            started_at=started_at,
-            load_type=load_type,
-        )
 
         if not load_type:
             self._log_track_lookup_failure(

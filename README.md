@@ -54,17 +54,6 @@ LAVASRC_SPOTIFY_CUSTOM_TOKEN_ENDPOINT=http://spotify-tokener:8080/api/token
 
 For generated/editorial playlists, set `LAVASRC_SPOTIFY_SP_DC` from your logged-in `open.spotify.com` browser cookie. The bot also switches LavaSrc Spotify API mode at runtime so direct Spotify tracks and Spotify playlists both load correctly.
 
-This fork also enables a Spotify-only fast-start path by default with:
-
-```env
-SPOTIFY_FAST_PLAYLIST_START=true
-SPOTIFY_FAST_PLAYLIST_BACKOFF_SECONDS=300
-```
-
-When enabled, Spotify playlist commands try to resolve and start the first track quickly through Spotify Web API metadata, then backfill the rest of the playlist through the normal LavaSrc playlist load in the background. If the fast path fails for any reason, the bot falls back to the normal full-playlist lookup automatically.
-
-If Spotify rate-limits the fast path, the bot now enters a short cooldown and skips repeated fast-path attempts until the backoff window passes, instead of throwing stack traces on every playlist request.
-
 ## Single-Guild Behavior
 
 When `SERVER_ID` is set:

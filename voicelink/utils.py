@@ -25,17 +25,13 @@ import random
 import time
 import socket
 import discord
-import logging
 
 from itertools import zip_longest
 from typing import Any, Dict, Optional, Union
-from timeit import default_timer as timer
 from discord.ext import commands
 
 from .mongodb import MongoDBHandler
 from .language import LangHandler
-
-logger = logging.getLogger("vocard.dispatch")
 
 # __all__ = [
 #     "ExponentialBackoff",
@@ -329,8 +325,6 @@ async def dispatch_message(
     if not content:
         content = "No content provided."
 
-    started_at = timer()
-
     # Determine the text to send
     embed = content if isinstance(content, discord.Embed) else None
     text = None if embed else str(content).format(*params) if params else str(content)
@@ -377,17 +371,6 @@ async def dispatch_message(
     
     if requires_fetch and isinstance(message, (discord.WebhookMessage, discord.InteractionMessage)):
         message = await message.fetch()
-
-    elapsed_ms = round((timer() - started_at) * 1000, 2)
-    log = logger.info if elapsed_ms >= 150 else logger.debug
-    log(
-        "message_send_ms=%.2f guild_id=%s channel_id=%s has_embed=%s ephemeral=%s",
-        elapsed_ms,
-        getattr(ctx.guild, "id", "unknown"),
-        getattr(ctx.channel, "id", "unknown"),
-        embed is not None,
-        ephemeral,
-    )
 
     return message
 

@@ -133,27 +133,6 @@ class Basic(commands.Cog):
             return await send_localized_message(ctx, "voice.connection.notInChannel", ctx.author.mention, player.channel.mention, ephemeral=True)
         settings = player.settings
 
-        fast_loader = getattr(player, "try_start_spotify_playlist_fast", None)
-        fast_result = await fast_loader(
-            ctx,
-            query,
-            ctx.author,
-            start_time=format_to_ms(start),
-            end_time=format_to_ms(end),
-        ) if callable(fast_loader) else None
-        if fast_result:
-            texts = player.get_msg("common.status.live", "player.playback.trackLoadPos", "player.playback.trackLoad")
-            track = fast_result.first_track
-            stream_content = f"`{texts[0]}`" if track.is_stream else ""
-            additional_content = texts[1] if fast_result.queue_position >= 1 else texts[2]
-            return await dispatch_message(
-                ctx,
-                stream_content + additional_content,
-                track.title, track.uri, track.author, track.formatted_length,
-                fast_result.queue_position if fast_result.queue_position >= 1 else None,
-                settings=settings,
-            )
-
         tracks = await player.get_tracks(query, requester=ctx.author)
         if not tracks:
             return await send_localized_message(ctx, "player.errors.noTrackFound", settings=settings)
@@ -204,21 +183,6 @@ class Basic(commands.Cog):
 
         await interaction.response.defer()
         settings = player.settings
-        fast_loader = getattr(player, "try_start_spotify_playlist_fast", None)
-        fast_result = await fast_loader(interaction, query, interaction.user) if callable(fast_loader) else None
-        if fast_result:
-            texts = player.get_msg("common.status.live", "player.playback.trackLoadPos", "player.playback.trackLoad")
-            track = fast_result.first_track
-            stream_content = f"`{texts[0]}`" if track.is_stream else ""
-            additional_content = texts[1] if fast_result.queue_position >= 1 else texts[2]
-            return await dispatch_message(
-                interaction,
-                stream_content + additional_content,
-                track.title, track.uri, track.author, track.formatted_length,
-                fast_result.queue_position if fast_result.queue_position >= 1 else None,
-                settings=settings,
-            )
-
         tracks = await player.get_tracks(query, requester=interaction.user)
         if not tracks:
             return await send_localized_message(interaction, "player.errors.noTrackFound", settings=settings)
@@ -326,28 +290,6 @@ class Basic(commands.Cog):
             return await send_localized_message(ctx, "voice.connection.notInChannel", ctx.author.mention, player.channel.mention, ephemeral=True)
         settings = player.settings
 
-        fast_loader = getattr(player, "try_start_spotify_playlist_fast", None)
-        fast_result = await fast_loader(
-            ctx,
-            query,
-            ctx.author,
-            start_time=format_to_ms(start),
-            end_time=format_to_ms(end),
-            at_front=True,
-        ) if callable(fast_loader) else None
-        if fast_result:
-            texts = player.get_msg("common.status.live", "player.playback.trackLoadPos", "player.playback.trackLoad")
-            track = fast_result.first_track
-            stream_content = f"`{texts[0]}`" if track.is_stream else ""
-            additional_content = texts[1] if fast_result.queue_position >= 1 else texts[2]
-            return await dispatch_message(
-                ctx,
-                stream_content + additional_content,
-                track.title, track.uri, track.author, track.formatted_length,
-                fast_result.queue_position if fast_result.queue_position >= 1 else None,
-                settings=settings,
-            )
-
         tracks = await player.get_tracks(query, requester=ctx.author)
         if not tracks:
             return await send_localized_message(ctx, "player.errors.noTrackFound", settings=settings)
@@ -395,28 +337,6 @@ class Basic(commands.Cog):
             await ctx.interaction.response.defer()
         settings = player.settings
 
-        fast_loader = getattr(player, "try_start_spotify_playlist_fast", None)
-        fast_result = await fast_loader(
-            ctx,
-            query,
-            ctx.author,
-            start_time=format_to_ms(start),
-            end_time=format_to_ms(end),
-            at_front=True,
-        ) if callable(fast_loader) and not player.is_playing else None
-        if fast_result:
-            if player.queue._repeat.mode == voicelink.LoopType.TRACK:
-                await player.set_repeat(voicelink.LoopType.OFF)
-            texts = player.get_msg("common.status.live", "player.playback.trackLoad")
-            track = fast_result.first_track
-            stream_content = f"`{texts[0]}`" if track.is_stream else ""
-            return await dispatch_message(
-                ctx,
-                stream_content + texts[1],
-                track.title, track.uri, track.author, track.formatted_length,
-                settings=settings,
-            )
-            
         tracks = await player.get_tracks(query, requester=ctx.author)
         if not tracks:
             return await send_localized_message(ctx, "player.errors.noTrackFound", settings=settings)
