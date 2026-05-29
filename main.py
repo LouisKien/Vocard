@@ -160,9 +160,7 @@ class Vocard(commands.Bot):
                 func.logger.error(f"Cannot connected to dashboard! - Reason: {e}")
 
         if bot_config.server_id:
-            guild = discord.Object(id=bot_config.server_id)
-            self.tree.copy_global_to(guild=guild)
-            await self.tree.sync(guild=guild)
+            await func.sync_single_guild_app_commands(self.tree, bot_config.server_id, func.logger)
         elif not bot_config.version or bot_config.version != update.__version__:
             await self.tree.sync()
 

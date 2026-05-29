@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 
 import voicelink
 
 from cogs.basic import Basic
+from function import sync_single_guild_app_commands
 from voicelink.views.controller import Tracks
 from voicelink.utils import TempCtx, dispatch_message
 
@@ -205,3 +207,65 @@ def test_controller_tracks_dropdown_is_hard_capped_to_25_options() -> None:
 
     assert len(select.options) == 25
     assert select.options[-1].label.startswith("25.")
+
+
+def test_single_guild_sync_purges_legacy_global_commands() -> None:
+    class _FakeCommandTree:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, object]] = []
+
+        def copy_global_to(self, guild=None) -> None:
+            self.calls.append(("copy_global_to", getattr(guild, "id", None)))
+
+        async def sync(self, guild=None):
+            self.calls.append(("sync", getattr(guild, "id", None)))
+            return []
+
+        async def fetch_commands(self):
+            self.calls.append(("fetch_commands", None))
+            return [SimpleNamespace(name="play")]
+
+        def clear_commands(self, guild=None) -> None:
+            self.calls.append(("clear_commands", getattr(guild, "id", None)))
+
+    tree = _FakeCommandTree()
+
+    asyncio.run(sync_single_guild_app_commands(tree, 1231657902280937694, logging.getLogger("test")))
+
+    assert tree.calls == [
+        ("copy_global_to", 1231657902280937694),
+        ("sync", 1231657902280937694),
+        ("fetch_commands", None),
+        ("clear_commands", None),
+        ("sync", None),
+    ]
+
+
+def test_single_guild_sync_skips_global_purge_when_no_legacy_commands_exist() -> None:
+    class _FakeCommandTree:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, object]] = []
+
+        def copy_global_to(self, guild=None) -> None:
+            self.calls.append(("copy_global_to", getattr(guild, "id", None)))
+
+        async def sync(self, guild=None):
+            self.calls.append(("sync", getattr(guild, "id", None)))
+            return []
+
+        async def fetch_commands(self):
+            self.calls.append(("fetch_commands", None))
+            return []
+
+        def clear_commands(self, guild=None) -> None:
+            self.calls.append(("clear_commands", getattr(guild, "id", None)))
+
+    tree = _FakeCommandTree()
+
+    asyncio.run(sync_single_guild_app_commands(tree, 1231657902280937694, logging.getLogger("test")))
+
+    assert tree.calls == [
+        ("copy_global_to", 1231657902280937694),
+        ("sync", 1231657902280937694),
+        ("fetch_commands", None),
+    ]

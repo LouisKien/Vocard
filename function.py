@@ -233,3 +233,34 @@ def should_translate_app_command_context(location: discord.app_commands.Translat
         discord.app_commands.TranslationContextLocation.group_description,
         discord.app_commands.TranslationContextLocation.parameter_description,
     }
+
+
+async def sync_single_guild_app_commands(
+    tree: discord.app_commands.CommandTree,
+    guild_id: int,
+    logger: logging.Logger,
+) -> None:
+    guild = discord.Object(id=guild_id)
+    tree.copy_global_to(guild=guild)
+    await tree.sync(guild=guild)
+
+    try:
+        legacy_global_commands = await tree.fetch_commands()
+    except Exception as exc:
+        logger.warning("Failed to inspect legacy global slash commands for cleanup.", exc_info=exc)
+        return
+
+    if not legacy_global_commands:
+        return
+
+    tree.clear_commands(guild=None)
+    try:
+        await tree.sync()
+    except Exception as exc:
+        logger.warning("Failed to clear legacy global slash commands.", exc_info=exc)
+        return
+
+    logger.info(
+        "Cleared %s legacy global slash command(s); single-guild mode now uses guild-scoped commands only.",
+        len(legacy_global_commands),
+    )
