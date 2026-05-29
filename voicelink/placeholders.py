@@ -23,11 +23,13 @@ SOFTWARE.
 
 from __future__ import annotations
 
+import ast
+import logging
 import re
 import discord
 
 from discord.ext import commands
-from typing import TYPE_CHECKING, List, Callable
+from typing import TYPE_CHECKING, Any, List, Callable
 
 from .config import Config
 from .utils import format_ms
@@ -36,6 +38,87 @@ if TYPE_CHECKING:
     from .player import Player
     from .objects import Track
     from .pool import NodePool
+
+
+logger: logging.Logger = logging.getLogger("vocard.placeholders")
+
+
+def _coerce_expression_value(value: Any) -> Any:
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped.isdigit():
+            return int(stripped)
+    return value
+
+
+class _ExpressionEvaluator(ast.NodeVisitor):
+    def __init__(self, variables: dict[str, Any]) -> None:
+        self._variables = variables
+
+    def visit_Expression(self, node: ast.Expression) -> Any:
+        return self.visit(node.body)
+
+    def visit_Constant(self, node: ast.Constant) -> Any:
+        if isinstance(node.value, (str, int, float, bool)) or node.value is None:
+            return node.value
+        raise ValueError("Unsupported constant value")
+
+    def visit_Name(self, node: ast.Name) -> Any:
+        if node.id not in self._variables:
+            raise ValueError(f"Unknown variable {node.id!r}")
+        return self._variables[node.id]
+
+    def visit_UnaryOp(self, node: ast.UnaryOp) -> Any:
+        if isinstance(node.op, ast.Not):
+            return not bool(self.visit(node.operand))
+        raise ValueError("Unsupported unary operator")
+
+    def visit_BoolOp(self, node: ast.BoolOp) -> Any:
+        values = [bool(self.visit(value)) for value in node.values]
+        if isinstance(node.op, ast.And):
+            return all(values)
+        if isinstance(node.op, ast.Or):
+            return any(values)
+        raise ValueError("Unsupported boolean operator")
+
+    def visit_Compare(self, node: ast.Compare) -> Any:
+        left = self.visit(node.left)
+        for operator, comparator_node in zip(node.ops, node.comparators):
+            right = self.visit(comparator_node)
+            if isinstance(operator, ast.Eq):
+                valid = left == right
+            elif isinstance(operator, ast.NotEq):
+                valid = left != right
+            elif isinstance(operator, ast.Gt):
+                valid = left > right
+            elif isinstance(operator, ast.GtE):
+                valid = left >= right
+            elif isinstance(operator, ast.Lt):
+                valid = left < right
+            elif isinstance(operator, ast.LtE):
+                valid = left <= right
+            else:
+                raise ValueError("Unsupported comparison operator")
+
+            if not valid:
+                return False
+            left = right
+
+        return True
+
+    def generic_visit(self, node: ast.AST) -> Any:
+        raise ValueError(f"Unsupported expression node: {type(node).__name__}")
+
+
+def evaluate_placeholder_condition(expression: str, variables: dict[str, Any]) -> bool:
+    safe_variables = {key: _coerce_expression_value(value) for key, value in variables.items()}
+    normalized_expression = re.sub(
+        r'@@(.*?)@@',
+        lambda match: repr(safe_variables.get(match.group(1), "")),
+        expression,
+    )
+    tree = ast.parse(normalized_expression, mode="eval")
+    return bool(_ExpressionEvaluator(safe_variables).visit(tree))
     
 def ensure_track(func) -> Callable:
     def wrapper(self: PlayerPlaceholder, *args, **kwargs):
@@ -181,15 +264,7 @@ class PlayerPlaceholder:
                 true_value = parts[1].strip()
 
             try:
-                # Replace variable placeholders with their values
-                expression = re.sub(r'@@(.*?)@@', lambda x: "'" + variables.get(x.group(1), '') + "'", expression)
-                expression = re.sub(r"'(\d+)'", lambda x: str(int(x.group(1))), expression)
-                expression = re.sub(r"'(\d+)'\s*([><=!]+)\s*(\d+)", lambda x: f"{int(x.group(1))} {x.group(2)} {int(x.group(3))}", expression)
-
-                # Evaluate the expression
-                result = eval(expression, {"__builtins__": None}, variables)
-
-                # Replace the match with the true or false value based on the result
+                result = evaluate_placeholder_condition(expression, variables)
                 replacement = true_value if result else false_value
                 text = text.replace("{{" + match + "}}", replacement)
 
@@ -236,8 +311,8 @@ class PlayerPlaceholder:
             embed.description = placeholder.replace(embed_form.get("description"), rv)
             embed.color = int(placeholder.replace(embed_form.get("color"), rv))
 
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Failed to build controller embed from placeholder template.", exc_info=exc)
 
         return embed
 

@@ -21,6 +21,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
 
+import asyncio
 import aiohttp
 import random
 import re
@@ -81,6 +82,47 @@ Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10_5_6; en-US) AppleWebKit/530.9 (KHTM
 Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10_5_6; en-US) AppleWebKit/530.6 (KHTML, like Gecko) Chrome/ Safari/530.6
 Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10_5_6; en-US) AppleWebKit/530.5 (KHTML, like Gecko) Chrome/ Safari/530.5'''
 
+HTTP_TIMEOUT = aiohttp.ClientTimeout(total=10, connect=5, sock_connect=5, sock_read=10)
+
+
+def _headers(extra: Optional[dict[str, str]] = None) -> dict[str, str]:
+    headers = {"User-Agent": random.choice(userAgents)}
+    if extra:
+        headers.update(extra)
+    return headers
+
+
+async def _fetch_text(
+    url: str,
+    *,
+    params: Optional[dict] = None,
+    headers: Optional[dict[str, str]] = None,
+) -> Optional[str]:
+    try:
+        async with aiohttp.ClientSession(timeout=HTTP_TIMEOUT) as session:
+            async with session.get(url=url, headers=headers or _headers(), params=params) as response:
+                if response.status != 200:
+                    return None
+                return await response.text()
+    except aiohttp.ClientError:
+        return None
+
+
+async def _fetch_json(
+    url: str,
+    *,
+    params: Optional[dict] = None,
+    headers: Optional[dict[str, str]] = None,
+) -> Optional[dict | list]:
+    try:
+        async with aiohttp.ClientSession(timeout=HTTP_TIMEOUT) as session:
+            async with session.get(url=url, headers=headers or _headers(), params=params) as response:
+                if response.status != 200:
+                    return None
+                return await response.json()
+    except aiohttp.ClientError:
+        return None
+
 class LyricsPlatform(ABC):
     @abstractmethod
     async def get_lyrics(self, title: str, artist: str) -> Optional[dict[str, str]]:
@@ -88,14 +130,7 @@ class LyricsPlatform(ABC):
 
 class A_ZLyrics(LyricsPlatform):
     async def get(self, url) -> str:
-        try:
-            async with aiohttp.ClientSession() as session:
-                resp = await session.get(url=url, headers={'User-Agent': random.choice(userAgents)})
-                if resp.status != 200:
-                    return None
-                return await resp.text()
-        except aiohttp.ClientError:
-            return ""
+        return await _fetch_text(url) or ""
 
     async def get_lyrics(self, title: str, artist: str) -> dict[str, str]:
         link = await self.googleGet(title=title, artist=artist)
@@ -207,7 +242,7 @@ class Genius(LyricsPlatform):
         self.genius = self.module.Genius(Config().genius_token)
 
     async def get_lyrics(self, title: str, artist: str) -> Optional[dict[str, str]]:
-        song = self.genius.search_song(title=title, artist=artist)
+        song = await asyncio.to_thread(self.genius.search_song, title=title, artist=artist)
         if not song:
             return None
         
@@ -218,31 +253,21 @@ class Lyrist(LyricsPlatform):
         self.base_url: str = "https://lyrist.vercel.app/api/"
 
     async def get_lyrics(self, title: str, artist: str) -> Optional[dict[str, str]]:
-        try:
-            request_url = self.base_url + title + "/" + artist
-            async with aiohttp.ClientSession() as session:
-                resp = await session.get(url=request_url, headers={'User-Agent': random.choice(userAgents)})
-                if resp.status != 200:
-                    return None
-                
-                data = await resp.json()
-                return {"default": data["lyrics"]}
-        except aiohttp.ClientError:
+        request_url = self.base_url + title + "/" + artist
+        data = await _fetch_json(request_url)
+        if not data:
             return None
+        return {"default": data["lyrics"]}
 
 class Lrclib(LyricsPlatform):
     def __init__(self):
         self.base_url: str = "https://lrclib.net/api/"
 
     async def get(self, url, params: dict = None) -> list[dict]:
-        try:
-            async with aiohttp.ClientSession() as session:
-                resp = await session.get(url=url, headers={'User-Agent': random.choice(userAgents)}, params=params)
-                if resp.status != 200:
-                    return None
-                return await resp.json()
-        except aiohttp.ClientError:
+        result = await _fetch_json(url, params=params)
+        if result is None:
             return []
+        return result
         
     async def get_lyrics(self, title: str, artist: str) -> Optional[dict[str, str]]:
         params = {"q": title}
@@ -291,34 +316,33 @@ class MusixMatch(LyricsPlatform):
 
     async def get_latest_app(self):
         url = "https://www.musixmatch.com/search"
+        html_content = await _fetch_text(url, headers={**self.headers, "Cookie": "mxm_bab=AB"})
+        if not html_content:
+            raise Exception("Failed to fetch MusixMatch search page.")
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers={**self.headers, "Cookie": "mxm_bab=AB"}) as response:
-                html_content = await response.text()
-                pattern = r'src="([^"]*/_next/static/chunks/pages/_app-[^"]+\.js)"'
-                matches = re.findall(pattern, html_content)
+        pattern = r'src="([^"]*/_next/static/chunks/pages/_app-[^"]+\.js)"'
+        matches = re.findall(pattern, html_content)
 
-                if not matches:
-                    raise Exception("_app URL not found in the HTML content.")
-                
-                return matches[-1]
+        if not matches:
+            raise Exception("_app URL not found in the HTML content.")
+
+        return matches[-1]
 
     async def get_secret(self) -> str:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(await self.get_latest_app(), headers=self.headers, timeout=5) as response:
-                javascript_code = await response.text()
+        javascript_code = await _fetch_text(await self.get_latest_app(), headers=self.headers)
+        if not javascript_code:
+            raise Exception("Failed to fetch MusixMatch application bundle.")
 
-                pattern = r'from\(\s*"(.*?)"\s*\.split'
-                match = re.search(pattern, javascript_code)
+        pattern = r'from\(\s*"(.*?)"\s*\.split'
+        match = re.search(pattern, javascript_code)
 
-                if match:
-                    encoded_string = match.group(1)
-                    reversed_string = encoded_string[::-1]
+        if match:
+            encoded_string = match.group(1)
+            reversed_string = encoded_string[::-1]
 
-                    decoded_bytes = base64.b64decode(reversed_string)
-                    return decoded_bytes.decode("utf-8")
-                else:
-                    raise Exception("Encoded string not found in the JavaScript code.")
+            decoded_bytes = base64.b64decode(reversed_string)
+            return decoded_bytes.decode("utf-8")
+        raise Exception("Encoded string not found in the JavaScript code.")
 
     async def generate_signature(self, url: str) -> str:
         current_date = datetime.now()
@@ -341,17 +365,14 @@ class MusixMatch(LyricsPlatform):
         url = url.replace("%20", "+").replace(" ", "+")
         url = self.base_url + url
         signed_url = url + await self.generate_signature(url)
+        text_data = await _fetch_text(signed_url, headers=self.headers)
+        if text_data is None:
+            raise Exception(f"HTTP Error while fetching URL: {signed_url}")
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(signed_url, headers=self.headers, timeout=5) as response:
-                if response.status != 200:
-                    raise Exception(f"HTTP Error: {response.status} for URL: {signed_url}")
-
-                try:
-                    text_data = await response.text()
-                    return json.loads(text_data)
-                except json.JSONDecodeError:
-                    raise Exception(f"Failed to parse JSON. Response: {text_data}")
+        try:
+            return json.loads(text_data)
+        except json.JSONDecodeError:
+            raise Exception(f"Failed to parse JSON. Response: {text_data}")
 
     async def get_lyrics(self, title: str, artist: str) -> Optional[dict[str, str]]:
         results = await self.search_tracks(track_query=f"{artist} {title}" if artist else title)

@@ -4,6 +4,7 @@ import logging
 import voicelink
 
 from discord.ext import commands
+from contextlib import suppress
 from typing import Optional
 
 from .methods import process_methods
@@ -36,7 +37,7 @@ class IPCClient:
         self._websocket: Optional[aiohttp.ClientWebSocketResponse] = None
         self._task: Optional[asyncio.Task] = None
 
-        self._heanders = {
+        self._headers = {
             "Authorization": self._password,
             "User-Id": str(bot.user.id),
             "Client-Version": voicelink.Config().version
@@ -45,8 +46,12 @@ class IPCClient:
     async def _listen(self) -> None:
         while True:
             try:
+                if not self._websocket:
+                    return
                 msg = await self._websocket.receive()
                 self._logger.debug(f"Received Message: {msg}")
+            except asyncio.CancelledError:
+                return
             except Exception:
                 break
 
@@ -92,15 +97,16 @@ class IPCClient:
                     
     async def connect(self):    
         try:
-            if not self._session:
-                self._session = aiohttp.ClientSession()
-
             if self._is_connecting or self._is_connected:
-                return
+                return self
+
+            if not self._session or self._session.closed:
+                timeout = aiohttp.ClientTimeout(total=10, connect=5, sock_connect=5)
+                self._session = aiohttp.ClientSession(timeout=timeout)
             
             self._is_connecting = True
             self._websocket = await self._session.ws_connect(
-                self._websocket_url, headers=self._heanders, heartbeat=self._heartbeat
+                self._websocket_url, headers=self._headers, heartbeat=self._heartbeat
             )
 
             self._task = self._bot.loop.create_task(self._listen())
@@ -124,9 +130,24 @@ class IPCClient:
 
     async def disconnect(self) -> None:
         self._is_connected = False
-        self._task.cancel()
+        current_task = asyncio.current_task()
+        if self._task and self._task is not current_task:
+            self._task.cancel()
+
+        websocket = self._websocket
+        self._websocket = None
+        if websocket and not websocket.closed:
+            with suppress(aiohttp.ClientError):
+                await websocket.close()
+
+        session = self._session
+        self._session = None
+        if session and not session.closed:
+            await session.close()
+
+        self._task = None
         self._logger.info("Disconnected to dashboard!")
     
     @property
     def is_connected(self) -> bool:
-        return self._is_connected and self._websocket and not self._websocket.closed
+        return bool(self._is_connected and self._websocket and not self._websocket.closed)

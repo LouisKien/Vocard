@@ -26,6 +26,7 @@ import time
 import asyncio
 import logging
 import os
+from urllib.parse import urlsplit, urlunsplit
 
 from typing import Any, Dict, Optional, Literal, TypedDict, List
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection
@@ -39,6 +40,23 @@ def _get_int_env(name: str, default: int) -> int:
     if value in (None, ""):
         return default
     return int(value)
+
+
+def _redact_mongodb_uri(uri: str) -> str:
+    if not uri:
+        return uri
+
+    parsed = urlsplit(uri)
+    if "@" not in parsed.netloc:
+        return uri
+
+    credentials, host = parsed.netloc.rsplit("@", 1)
+    if ":" not in credentials:
+        return uri
+
+    username, _password = credentials.split(":", 1)
+    redacted_netloc = f"{username}:***@{host}"
+    return urlunsplit((parsed.scheme, redacted_netloc, parsed.path, parsed.query, parsed.fragment))
 
 # Type definitions for better code clarity
 class PlaylistPerms(TypedDict):
@@ -124,7 +142,11 @@ class MongoDBHandler:
                 logger.warning("MongoDB client is already initialized. Skipping reinitialization.")
                 return
 
-            logger.debug("Initializing MongoDB client with URI: %s and DB name: %s", uri, db_name)
+            logger.debug(
+                "Initializing MongoDB client with URI: %s and DB name: %s",
+                _redact_mongodb_uri(uri),
+                db_name,
+            )
 
             try:
                 cls._client = AsyncIOMotorClient(

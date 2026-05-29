@@ -312,7 +312,9 @@ def encode(
     track: Dict[str, Any],
     source_encoders: Mapping[str, Callable[[DataWriter, Dict[str, Any]], None]] = MISSING
 ) -> str:
-    assert V3_KEYSET <= track.keys()
+    missing_keys = sorted(V3_KEYSET - track.keys())
+    if missing_keys:
+        raise ValueError(f"Missing required track keys: {', '.join(missing_keys)}")
 
     writer = DataWriter()
     version = struct.pack('B', 3)

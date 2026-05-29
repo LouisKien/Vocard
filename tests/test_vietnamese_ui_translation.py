@@ -176,8 +176,12 @@ def test_default_controller_templates_render_in_vietnamese_for_vn_guilds() -> No
     )
     placeholder = PlayerPlaceholder(SimpleNamespace(user=bot_user), player)
 
-    for settings_name in ("settings.defaults.json", "settings.json"):
-        raw_settings = json.loads((ROOT / settings_name).read_text(encoding="utf8"))
+    settings_paths = [ROOT / "settings.defaults.json", ROOT / "settings.json"]
+    for settings_path in settings_paths:
+        if not settings_path.exists():
+            continue
+
+        raw_settings = json.loads(settings_path.read_text(encoding="utf8"))
         sanitized_settings = dict(raw_settings)
         sanitized_settings["client_id"] = ""
         sanitized_settings["server_id"] = ""

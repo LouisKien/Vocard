@@ -87,7 +87,7 @@ The Compose defaults in this fork intentionally favor stability on small homelab
 
 - MongoDB is pinned to `4.4` for non-AVX CPUs and uses a conservative WiredTiger cache cap by default.
 - Lavalink keeps the quality-first audio settings in `lavalink/application.yml`, but the JVM heap is bounded so the music node does not over-claim RAM.
-- The bot container enables Python fault-handler output and writes logs to stdout/stderr by default for Docker-native troubleshooting.
+- The bot container enables Python fault-handler output, runs as an unprivileged `vocard` user, and writes logs to stdout/stderr by default for Docker-native troubleshooting.
 
 To reset all persisted data, explicitly remove volumes:
 
@@ -102,10 +102,12 @@ This fork defaults to homelab-safe operation:
 - MongoDB is pinned to 4.4 because MongoDB 5+ requires AVX on x86_64 and will not start on Intel N4100-class CPUs.
 - MongoDB and Lavalink are only reachable on the internal Compose network.
 - Bot logs go to Docker stdout/stderr by default via `LOG_FILE_ENABLE=false`.
+- The bot image drops root privileges at runtime; only the bot process writes inside `/app`.
 - Lavalink built-in YouTube is disabled; the pinned YouTube plugin handles search.
 - YouTube playback uses `TVHTML5_SIMPLY` and `MWEB` as extra fallback clients for `youtube-source 1.18.1`.
 - Audio quality is set high with `opusEncodingQuality: 10`, `resamplingQuality: HIGH`, and a larger frame buffer.
 - Upstream update checks are disabled by default with `CHECK_UPSTREAM_UPDATES=false`.
+- Remote migration execution via `python update.py -m` is intentionally disabled in this fork; use `git pull` plus `docker compose up -d --build` and run any database migrations manually.
 
 Rotate any token or secret that has been pasted into chat or logs before exposing this bot beyond local testing.
 

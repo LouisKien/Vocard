@@ -607,10 +607,12 @@ class Player(VoiceProtocol):
         
         try:
             await self.disconnect()
-        except (AttributeError, errors.DiscordException):
+        except (AttributeError, errors.DiscordException) as exc:
             # 'NoneType' has no attribute '_get_voice_client_key' raised by self.cleanup() ->
             # assume we're already disconnected and cleaned up
-            assert self.channel is None and not self.is_connected
+            if self.channel is not None or self.is_connected:
+                raise
+            self._logger.debug("Player destroy detected an already-cleaned-up voice state.", exc_info=exc)
         
         self._node._players.pop(self.guild.id)
         await self.send(method=RequestMethod.DELETE)

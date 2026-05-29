@@ -27,7 +27,6 @@ import sys
 import requests
 import zipfile
 import shutil
-import subprocess
 from io import BytesIO
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -37,8 +36,8 @@ __version__ = "v2.7.3"
 PYTHON_CMD_NAME = os.path.basename(sys.executable)
 GITHUB_API_URL = "https://api.github.com/repos/ChocoMeow/Vocard/releases/latest"
 VOCARD_URL = "https://github.com/ChocoMeow/Vocard/archive/"
-MIGRATION_SCRIPT_URL = f"https://raw.githubusercontent.com/ChocoMeow/Vocard-Magration/main/{__version__}.py"
 IGNORE_FILES = ["settings.json", "logs", "last-session.json"]
+REQUEST_TIMEOUT = 10
 
 class bcolors:
     WARNING = '\033[93m'
@@ -55,7 +54,7 @@ def check_version(with_msg=False):
     Returns:
         str: the latest version.
     """
-    response = requests.get(GITHUB_API_URL)
+    response = requests.get(GITHUB_API_URL, timeout=REQUEST_TIMEOUT)
     latest_version = response.json().get("name", __version__)
     if with_msg:
         msg = (
@@ -77,7 +76,7 @@ def download_file(version=None):
     """
     version = version if version else check_version()
     print(f"Downloading Vocard version: {version}")
-    response = requests.get(VOCARD_URL + version + ".zip")
+    response = requests.get(VOCARD_URL + version + ".zip", timeout=REQUEST_TIMEOUT)
     if response.status_code == 404:
         print(f"{bcolors.FAIL}Warning: Version not found!{bcolors.ENDC}")
         exit(1)
@@ -125,35 +124,11 @@ def install(response, version):
         print("Update canceled!")
 
 def run_migration():
-    """Download, execute, and remove the migration script."""
-    confirm = input(
-        f"{bcolors.WARNING}WARNING: Please ensure you have taken a backup before proceeding.\n"
-        f"Are you sure you want to run the migration? (Y/n): {bcolors.ENDC} "
+    """Remote migration execution is intentionally disabled in this fork."""
+    print(
+        f"{bcolors.WARNING}Remote migration execution is disabled in this fork for production safety.\n"
+        f"Use git pull / docker compose up -d --build and run explicit manual data migrations if needed.{bcolors.ENDC}"
     )
-    if confirm.lower() not in ["y", "yes"]:
-        print("Migration canceled!")
-        return
-
-    print("Downloading migration script...")
-    response = requests.get(MIGRATION_SCRIPT_URL)
-    if response.status_code != 200:
-        print(f"{bcolors.FAIL}Failed to download migration script. Status code: {response.status_code}{bcolors.ENDC}")
-        exit(1)
-
-    migration_filename = "temp_migration.py"
-    with open(migration_filename, "w", encoding="utf-8") as f:
-        f.write(response.text)
-
-    print("Executing migration script...")
-    try:
-        subprocess.run([PYTHON_CMD_NAME, migration_filename], check=True)
-        print(f"{bcolors.OKGREEN}Migration script executed successfully.{bcolors.ENDC}")
-    except subprocess.CalledProcessError as e:
-        print(f"{bcolors.FAIL}Migration script execution failed: {e}{bcolors.ENDC}")
-    finally:
-        if os.path.exists(migration_filename):
-            os.remove(migration_filename)
-            print("Temporary migration script deleted.")
 
 def parse_args():
     """Parse command line arguments."""
