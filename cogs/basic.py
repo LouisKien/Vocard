@@ -975,6 +975,7 @@ class Basic(commands.Cog):
 
         if not player.is_playing:
             await player.do_next()
+        await self._refresh_controller_after_state_change(player, ctx)
         
         if player.is_ipc_connected:
             await player.send_ws({"op": "toggleAutoplay", "status": check})

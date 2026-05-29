@@ -315,6 +315,7 @@ class AutoPlay(ControlButton):
 
         if not self.player.is_playing:
             await self.player.do_next()
+        await self.player.refresh_controller_for_state_change(interaction)
 
 class Shuffle(ControlButton):
     def __init__(self, **kwargs):
@@ -353,6 +354,7 @@ class Forward(ControlButton):
 
         await self.player.seek(position)
         await self.send(interaction, 'player.controls.forward', format_ms(position))
+        await self.player.refresh_controller_for_state_change(interaction)
 
 class Rewind(ControlButton):
     def __init__(self, **kwargs):
@@ -372,6 +374,7 @@ class Rewind(ControlButton):
         
         await self.player.seek(position)
         await self.send(interaction, 'player.controls.rewind', format_ms(position))
+        await self.player.refresh_controller_for_state_change(interaction)
 
 class Lyrics(ControlButton):
     def __init__(self, **kwargs):

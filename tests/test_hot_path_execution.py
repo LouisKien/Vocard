@@ -7,11 +7,28 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import discord
+import pytest
 import voicelink
 
 from cogs.basic import Basic
+from cogs.playlist import Playlists
+from cogs.settings import Settings
 from function import sync_single_guild_app_commands
-from voicelink.views.controller import Tracks, PlayPause
+from voicelink.views.controller import (
+    AutoPlay,
+    Forward,
+    Loop,
+    PlayPause,
+    Skip,
+    Stop,
+    Back,
+    Rewind,
+    Shuffle,
+    Tracks,
+    VolumeDown,
+    VolumeMute,
+    VolumeUp,
+)
 from voicelink.utils import TempCtx, dispatch_message
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -36,11 +53,14 @@ class _FakePlayer:
         self._is_playing = is_playing
         self._is_paused = False
         self.order: list[str] = []
-        self.settings = {"lang": "VN", "silent_msg": False}
+        self.settings = {"lang": "VN", "silent_msg": False, "autoplay": False}
         self.channel = SimpleNamespace(mention="#music", members=[])
         self.context = SimpleNamespace(channel=SimpleNamespace(id=111), guild=SimpleNamespace(id=123))
         self.node = SimpleNamespace(_available=True)
         self.current = SimpleNamespace(requester=SimpleNamespace())
+        self.is_ipc_connected = False
+        self.position = 60000
+        self.volume = 100
         self.queue = SimpleNamespace(
             _repeat=SimpleNamespace(mode=voicelink.LoopType.OFF),
             skipto=lambda index: self.order.append(f"skipto:{index}"),
@@ -61,7 +81,7 @@ class _FakePlayer:
     def is_privileged(self, _author) -> bool:
         return True
 
-    async def get_tracks(self, _query, requester=None, search_type=None):
+    async def get_tracks(self, _query=None, requester=None, search_type=None, query=None):
         self.order.append("get_tracks")
         return self._tracks
 
@@ -103,9 +123,10 @@ class _FakePlayer:
         return "Moved"
 
     async def seek(self, position, requester=None):
+        self.position = position
         self.order.append(f"seek:{position}")
 
-    async def set_repeat(self, mode):
+    async def set_repeat(self, mode, requester=None):
         self.order.append(f"repeat:{mode.name}")
 
     def get_msg(self, *_keys):
@@ -244,6 +265,245 @@ def test_play_refreshes_controller_after_playlist_confirmation(monkeypatch) -> N
     assert player.order.index("message") < player.order.index("refresh_controller")
 
 
+@pytest.mark.parametrize(
+    ("callback", "kwargs"),
+    [
+        (Basic.playtop.callback, {"query": "https://example.com/song", "start": "0", "end": "0"}),
+        (Basic.forceplay.callback, {"query": "https://example.com/song", "start": "0", "end": "0"}),
+    ],
+)
+def test_queue_add_commands_refresh_controller_after_confirmation(monkeypatch, callback, kwargs) -> None:
+    track = SimpleNamespace(
+        title="Song",
+        uri="https://example.com/song",
+        author="Artist",
+        formatted_length="03:00",
+        is_stream=False,
+    )
+    player = _FakePlayer(tracks=[track], is_playing=True)
+    ctx = SimpleNamespace(
+        guild=SimpleNamespace(voice_client=player, id=123),
+        channel=SimpleNamespace(id=600),
+        author=SimpleNamespace(mention="@user"),
+        interaction=SimpleNamespace(response=SimpleNamespace(defer=lambda: None)) if callback is Basic.forceplay.callback else None,
+    )
+    cog = Basic(_FakeBot())
+
+    async def fake_dispatch_message(*_args, **_kwargs):
+        player.order.append("message")
+        return None
+
+    async def fake_defer():
+        player.order.append("defer")
+
+    if ctx.interaction:
+        ctx.interaction.response.defer = fake_defer
+
+    monkeypatch.setattr("cogs.basic.dispatch_message", fake_dispatch_message)
+
+    asyncio.run(callback(cog, ctx, **kwargs))
+
+    assert player.order.index("message") < player.order.index("refresh_controller")
+    assert "context:600" in player.order
+
+
+def test_context_menu_play_refreshes_controller_after_confirmation(monkeypatch) -> None:
+    track = SimpleNamespace(
+        title="Clip Song",
+        uri="https://example.com/clip",
+        author="Artist",
+        formatted_length="03:10",
+        is_stream=False,
+    )
+    player = _FakePlayer(tracks=[track], is_playing=True)
+    interaction = SimpleNamespace(
+        guild=SimpleNamespace(voice_client=player, id=123),
+        channel=SimpleNamespace(id=604),
+        user=SimpleNamespace(mention="@user"),
+        response=SimpleNamespace(),
+    )
+    message = SimpleNamespace(content="https://example.com/clip", attachments=[])
+    cog = Basic(_FakeBot())
+
+    async def fake_defer():
+        player.order.append("defer")
+
+    async def fake_dispatch_message(*_args, **_kwargs):
+        player.order.append("message")
+        return None
+
+    interaction.response.defer = fake_defer
+    monkeypatch.setattr("cogs.basic.dispatch_message", fake_dispatch_message)
+
+    asyncio.run(Basic._play(cog, interaction, message))
+
+    assert player.order.index("message") < player.order.index("refresh_controller")
+    assert "context:604" in player.order
+
+
+def test_search_selection_refreshes_controller_after_confirmation(monkeypatch) -> None:
+    tracks = [
+        SimpleNamespace(
+            title="Result 1",
+            uri="https://example.com/result-1",
+            author="Artist",
+            formatted_length="03:11",
+            is_stream=False,
+        ),
+        SimpleNamespace(
+            title="Result 2",
+            uri="https://example.com/result-2",
+            author="Artist",
+            formatted_length="03:12",
+            is_stream=False,
+        ),
+    ]
+    player = _FakePlayer(tracks=tracks, is_playing=True)
+    ctx = SimpleNamespace(
+        guild=SimpleNamespace(voice_client=player, id=123),
+        channel=SimpleNamespace(id=605),
+        author=SimpleNamespace(mention="@user"),
+        interaction=None,
+    )
+    cog = Basic(_FakeBot())
+
+    class _FakeSearchView:
+        def __init__(self, *, tracks, texts):
+            self.tracks = tracks
+            self.texts = texts
+            self.values = ["1. Result 1"]
+            self.response = None
+
+        async def wait(self):
+            return None
+
+    async def fake_dispatch_message(*_args, **kwargs):
+        if kwargs.get("view") is not None:
+            player.order.append("search_results")
+            return SimpleNamespace()
+        player.order.append("message")
+        return None
+
+    async def fake_get_lang(*_args, **_kwargs):
+        return (
+            "Search: {}",
+            "{} {} {} {}",
+            "LIVE",
+            "TRACK_LOAD_POS",
+            "TRACK_LOAD",
+            "wait",
+            "success",
+        )
+
+    monkeypatch.setattr("cogs.basic.SearchView", _FakeSearchView)
+    monkeypatch.setattr("cogs.basic.dispatch_message", fake_dispatch_message)
+    monkeypatch.setattr("cogs.basic.LangHandler.get_lang", fake_get_lang)
+
+    asyncio.run(Basic.search.callback(cog, ctx, query="song name", platform=voicelink.SearchType.YOUTUBE.name))
+
+    assert player.order.index("search_results") < player.order.index("add_track")
+    assert player.order.index("message") < player.order.index("refresh_controller")
+    assert "context:605" in player.order
+
+
+def test_playlist_play_refreshes_controller_after_confirmation(monkeypatch) -> None:
+    track = SimpleNamespace(
+        title="Saved Song",
+        uri="https://example.com/saved",
+        author="Artist",
+        formatted_length="03:00",
+        is_stream=False,
+    )
+    player = _FakePlayer(tracks=[], is_playing=True)
+    ctx = SimpleNamespace(
+        guild=SimpleNamespace(voice_client=player, id=123),
+        channel=SimpleNamespace(id=601),
+        author=SimpleNamespace(id=999),
+    )
+    cog = Playlists(_FakeBot())
+
+    async def fake_check_playlist(_ctx, _name=None, full=False):
+        return {
+            "playlist": {
+                "type": "link",
+                "uri": "https://example.com/playlist",
+                "name": "Favs",
+            },
+            "position": 1,
+        }
+
+    async def fake_search_playlist(_uri, _requester, time_needed=False):
+        return {"name": "Favs", "tracks": [track]}
+
+    async def fake_send_localized_message(*_args, **_kwargs):
+        player.order.append("message")
+
+    monkeypatch.setattr("cogs.playlist.check_playlist", fake_check_playlist)
+    monkeypatch.setattr("cogs.playlist.search_playlist", fake_search_playlist)
+    monkeypatch.setattr("cogs.playlist.send_localized_message", fake_send_localized_message)
+
+    asyncio.run(Playlists.play.callback(cog, ctx, name="favs", value=None))
+
+    assert player.order.index("add_track") < player.order.index("message")
+    assert player.order.index("message") < player.order.index("refresh_controller")
+    assert "context:601" in player.order
+
+
+def test_queue_import_refreshes_controller_after_confirmation(monkeypatch) -> None:
+    player = _FakePlayer(tracks=[], is_playing=True)
+    ctx = SimpleNamespace(
+        guild=SimpleNamespace(voice_client=player, id=123),
+        channel=SimpleNamespace(id=606),
+        author=SimpleNamespace(),
+    )
+    cog = Basic(_FakeBot())
+
+    class _FakeTrack(SimpleNamespace):
+        @staticmethod
+        def decode(track_id):
+            return {
+                "identifier": track_id,
+                "title": f"Track {track_id}",
+                "author": "Artist",
+                "uri": f"https://example.com/{track_id}",
+                "length": 1000,
+                "sourceName": "youtube",
+            }
+
+        def __init__(self, track_id, info, requester):
+            super().__init__(
+                track_id=track_id,
+                title=info["title"],
+                author=info["author"],
+                uri=info["uri"],
+                length=info["length"],
+                formatted_length="00:01",
+                is_stream=False,
+                requester=requester,
+            )
+
+    attachment = SimpleNamespace(
+        filename="saved.txt",
+        read=lambda: None,
+    )
+
+    async def fake_read():
+        return b"header\ntrack-a,track-b"
+
+    async def fake_send_localized_message(*_args, **_kwargs):
+        player.order.append("message")
+
+    attachment.read = fake_read
+    monkeypatch.setattr("cogs.basic.send_localized_message", fake_send_localized_message)
+    monkeypatch.setattr("cogs.basic.voicelink.Track", _FakeTrack)
+
+    asyncio.run(Basic._import.callback(cog, ctx, attachment=attachment))
+
+    assert player.order.index("add_track") < player.order.index("message")
+    assert player.order.index("message") < player.order.index("refresh_controller")
+    assert "context:606" in player.order
+
+
 def test_play_sends_spotify_playlist_loading_notice_before_lookup_and_cleans_it_up(monkeypatch) -> None:
     player = _FakePlayer(tracks=_make_playlist(), is_playing=False)
     ctx = SimpleNamespace(
@@ -343,6 +603,44 @@ def test_skip_stops_audio_before_sending_confirmation(monkeypatch) -> None:
     assert player.order.index("stop") < player.order.index("message")
 
 
+def test_skip_binds_latest_controller_context_before_stopping(monkeypatch) -> None:
+    player = _FakePlayer(tracks=[], is_playing=True)
+    ctx = SimpleNamespace(
+        guild=SimpleNamespace(voice_client=player, id=123),
+        channel=SimpleNamespace(id=602),
+        author=SimpleNamespace(),
+    )
+    cog = Basic(_FakeBot())
+
+    async def fake_send_localized_message(*_args, **_kwargs):
+        player.order.append("message")
+
+    monkeypatch.setattr("cogs.basic.send_localized_message", fake_send_localized_message)
+
+    asyncio.run(Basic.skip.callback(cog, ctx, index=0))
+
+    assert player.order.index("context:602") < player.order.index("stop")
+
+
+def test_back_binds_latest_controller_context_before_stopping(monkeypatch) -> None:
+    player = _FakePlayer(tracks=[], is_playing=True)
+    ctx = SimpleNamespace(
+        guild=SimpleNamespace(voice_client=player, id=123),
+        channel=SimpleNamespace(id=603),
+        author=SimpleNamespace(),
+    )
+    cog = Basic(_FakeBot())
+
+    async def fake_send_localized_message(*_args, **_kwargs):
+        player.order.append("message")
+
+    monkeypatch.setattr("cogs.basic.send_localized_message", fake_send_localized_message)
+
+    asyncio.run(Basic.back.callback(cog, ctx, index=1))
+
+    assert player.order.index("context:603") < player.order.index("stop")
+
+
 def test_pause_command_refreshes_controller_after_confirmation(monkeypatch) -> None:
     player = _FakePlayer(tracks=[], is_playing=True)
     ctx = SimpleNamespace(
@@ -364,6 +662,28 @@ def test_pause_command_refreshes_controller_after_confirmation(monkeypatch) -> N
     assert "context:789" in player.order
 
 
+def test_resume_command_refreshes_controller_after_confirmation(monkeypatch) -> None:
+    player = _FakePlayer(tracks=[], is_playing=True)
+    player._is_paused = True
+    ctx = SimpleNamespace(
+        guild=SimpleNamespace(voice_client=player, id=123),
+        channel=SimpleNamespace(id=790),
+        author=SimpleNamespace(),
+    )
+    cog = Basic(_FakeBot())
+
+    async def fake_send_localized_message(*_args, **_kwargs):
+        player.order.append("message")
+
+    monkeypatch.setattr("cogs.basic.send_localized_message", fake_send_localized_message)
+
+    asyncio.run(Basic.resume.callback(cog, ctx))
+
+    assert player.order.index("pause:False") < player.order.index("message")
+    assert player.order.index("message") < player.order.index("refresh_state")
+    assert "context:790" in player.order
+
+
 def test_remove_command_refreshes_controller_after_confirmation(monkeypatch) -> None:
     player = _FakePlayer(tracks=[], is_playing=True)
     ctx = SimpleNamespace(
@@ -381,6 +701,114 @@ def test_remove_command_refreshes_controller_after_confirmation(monkeypatch) -> 
     asyncio.run(Basic.remove.callback(cog, ctx, position1=1, position2=None, member=None))
 
     assert player.order.index("remove_track") < player.order.index("message")
+    assert player.order.index("message") < player.order.index("refresh_state")
+
+
+@pytest.mark.parametrize(
+    ("callback", "kwargs", "expected_before_message"),
+    [
+        (Basic.clear.callback, {"queue": "queue"}, "clear:queue"),
+        (Basic.forward.callback, {"position": "10"}, "seek:70000"),
+        (Basic.rewind.callback, {"position": "30"}, "seek:30000"),
+        (Basic.replay.callback, {}, "seek:0"),
+        (Basic.shuffle.callback, {}, "shuffle:queue"),
+        (Basic.swap.callback, {"position1": 1, "position2": 2}, "swap"),
+        (Basic.move.callback, {"target": 3, "to": 1}, "move"),
+    ],
+)
+def test_state_mutation_commands_refresh_controller_after_confirmation(
+    monkeypatch,
+    callback,
+    kwargs,
+    expected_before_message,
+) -> None:
+    player = _FakePlayer(tracks=[], is_playing=True)
+    ctx = SimpleNamespace(
+        guild=SimpleNamespace(voice_client=player, id=123),
+        channel=SimpleNamespace(id=791),
+        author=SimpleNamespace(),
+    )
+    cog = Basic(_FakeBot())
+
+    async def fake_send_localized_message(*_args, **_kwargs):
+        player.order.append("message")
+
+    monkeypatch.setattr("cogs.basic.send_localized_message", fake_send_localized_message)
+
+    asyncio.run(callback(cog, ctx, **kwargs))
+
+    assert player.order.index(expected_before_message) < player.order.index("message")
+    assert player.order.index("message") < player.order.index("refresh_state")
+    assert "context:791" in player.order
+
+
+def test_loop_command_refreshes_controller_after_confirmation(monkeypatch) -> None:
+    player = _FakePlayer(tracks=[], is_playing=True)
+    ctx = SimpleNamespace(
+        guild=SimpleNamespace(voice_client=player, id=123),
+        channel=SimpleNamespace(id=792),
+        author=SimpleNamespace(),
+    )
+    cog = Basic(_FakeBot())
+
+    async def fake_send_localized_message(*_args, **_kwargs):
+        player.order.append("message")
+
+    monkeypatch.setattr("cogs.basic.send_localized_message", fake_send_localized_message)
+
+    asyncio.run(Basic.loop.callback(cog, ctx, mode="QUEUE"))
+
+    assert player.order.index("repeat:QUEUE") < player.order.index("message")
+    assert player.order.index("message") < player.order.index("refresh_state")
+    assert "context:792" in player.order
+
+
+def test_autoplay_command_refreshes_controller_after_confirmation(monkeypatch) -> None:
+    player = _FakePlayer(tracks=[], is_playing=True)
+    ctx = SimpleNamespace(
+        guild=SimpleNamespace(voice_client=player, id=123),
+        channel=SimpleNamespace(id=793),
+        author=SimpleNamespace(),
+    )
+    cog = Basic(_FakeBot())
+
+    async def fake_send_localized_message(*_args, **_kwargs):
+        player.order.append("message")
+
+    async def fake_get_lang(*_args, **_kwargs):
+        return "Enabled"
+
+    monkeypatch.setattr("cogs.basic.send_localized_message", fake_send_localized_message)
+    monkeypatch.setattr("cogs.basic.LangHandler.get_lang", fake_get_lang)
+
+    asyncio.run(Basic.autoplay.callback(cog, ctx))
+
+    assert player.order.index("message") < player.order.index("refresh_state")
+    assert "context:793" in player.order
+
+
+def test_settings_volume_command_refreshes_controller_after_confirmation(monkeypatch) -> None:
+    player = _FakePlayer(tracks=[], is_playing=True)
+    ctx = SimpleNamespace(
+        guild=SimpleNamespace(voice_client=player, id=123),
+        channel=SimpleNamespace(id=794),
+        author=SimpleNamespace(),
+    )
+    cog = Settings(_FakeBot())
+
+    async def fake_send_localized_message(*_args, **_kwargs):
+        player.order.append("message")
+
+    async def fake_update_settings(_guild_id, _payload):
+        player.order.append("db")
+
+    monkeypatch.setattr("cogs.settings.send_localized_message", fake_send_localized_message)
+    monkeypatch.setattr("cogs.settings.MongoDBHandler.update_settings", fake_update_settings)
+
+    asyncio.run(Settings.volume.callback(cog, ctx, value=42))
+
+    assert player.order.index("context:794") < player.order.index("volume:42")
+    assert player.order.index("volume:42") < player.order.index("db")
     assert player.order.index("message") < player.order.index("refresh_state")
 
 
@@ -606,6 +1034,38 @@ def test_refresh_controller_after_queue_update_rebinds_latest_context(monkeypatc
     assert recorded["context"] is new_ctx
 
 
+def test_refresh_controller_for_state_change_rebinds_latest_context() -> None:
+    recorded = {}
+    old_ctx = SimpleNamespace(channel=SimpleNamespace(id=111), guild=SimpleNamespace(id=123))
+    new_ctx = SimpleNamespace(channel=SimpleNamespace(id=457), guild=SimpleNamespace(id=123))
+
+    async def fake_invoke_controller(*, prefer_new_message=False):
+        recorded["prefer_new_message"] = prefer_new_message
+        recorded["context"] = fake_player.context
+
+    fake_player = SimpleNamespace(
+        context=old_ctx,
+        guild=SimpleNamespace(id=123),
+        invoke_controller=fake_invoke_controller,
+    )
+    fake_player.bind_controller_context = voicelink.Player.bind_controller_context.__get__(fake_player, type(fake_player))
+
+    asyncio.run(voicelink.Player.refresh_controller_for_state_change(fake_player, new_ctx))
+
+    assert recorded["prefer_new_message"] is False
+    assert recorded["context"] is new_ctx
+
+
+def test_bind_controller_context_ignores_foreign_guild() -> None:
+    original_ctx = SimpleNamespace(channel=SimpleNamespace(id=111), guild=SimpleNamespace(id=123))
+    foreign_ctx = SimpleNamespace(channel=SimpleNamespace(id=222), guild=SimpleNamespace(id=999))
+    fake_player = SimpleNamespace(context=original_ctx, guild=SimpleNamespace(id=123))
+
+    voicelink.Player.bind_controller_context(fake_player, foreign_ctx)
+
+    assert fake_player.context is original_ctx
+
+
 def test_invoke_controller_queues_pending_refresh_when_busy() -> None:
     fake_player = SimpleNamespace(
         settings={"controller": True},
@@ -617,6 +1077,22 @@ def test_invoke_controller_queues_pending_refresh_when_busy() -> None:
     )
 
     asyncio.run(voicelink.Player.invoke_controller(fake_player, prefer_new_message=True))
+
+    assert fake_player._controller_refresh_pending is True
+    assert fake_player._controller_refresh_prefer_new_message is True
+
+
+def test_invoke_controller_preserves_forced_refresh_preference_when_busy() -> None:
+    fake_player = SimpleNamespace(
+        settings={"controller": True},
+        _updating=True,
+        channel=SimpleNamespace(),
+        _tearing_down=False,
+        _controller_refresh_pending=True,
+        _controller_refresh_prefer_new_message=True,
+    )
+
+    asyncio.run(voicelink.Player.invoke_controller(fake_player, prefer_new_message=False))
 
     assert fake_player._controller_refresh_pending is True
     assert fake_player._controller_refresh_prefer_new_message is True
@@ -665,6 +1141,258 @@ def test_playpause_button_refreshes_controller_after_state_change() -> None:
 
     assert response.deferred is True
     assert order == ["pause:True", "refresh_state"]
+
+
+@pytest.mark.parametrize(
+    ("button_cls", "expected_prefix"),
+    [
+        (Loop, "repeat:TRACK"),
+        (VolumeUp, "volume:120"),
+        (VolumeDown, "volume:80"),
+        (Shuffle, "shuffle:queue"),
+        (Forward, "seek:70000"),
+        (Rewind, "seek:30000"),
+        (AutoPlay, "message"),
+    ],
+)
+def test_controller_buttons_refresh_controller_after_action(monkeypatch, button_cls, expected_prefix) -> None:
+    order: list[str] = []
+
+    async def fake_send_localized_message(*_args, **_kwargs):
+        order.append("message")
+        return None
+
+    async def fake_refresh(interaction=None):
+        order.append("refresh_state")
+
+    async def fake_set_repeat(mode=None, requester=None):
+        if mode is None:
+            order.append("repeat:TRACK")
+        else:
+            order.append(f"repeat:{mode.name}")
+
+    async def fake_set_volume(value, requester=None):
+        order.append(f"volume:{value}")
+
+    async def fake_shuffle(queue_type, requester=None):
+        order.append(f"shuffle:{queue_type}")
+
+    async def fake_seek(position):
+        order.append(f"seek:{position}")
+
+    async def fake_do_next():
+        order.append("do_next")
+
+    async def fake_get_lang(*_args, **_kwargs):
+        return "Enabled"
+
+    player = SimpleNamespace(
+        is_paused=False,
+        is_playing=True,
+        queue=SimpleNamespace(
+            _repeat=SimpleNamespace(mode=voicelink.LoopType.OFF, peek_next=lambda: voicelink.LoopType.TRACK)
+        ),
+        is_privileged=lambda _user: True,
+        required=lambda *args, **kwargs: 1,
+        set_repeat=fake_set_repeat,
+        set_volume=fake_set_volume,
+        shuffle=fake_shuffle,
+        seek=fake_seek,
+        refresh_controller_for_state_change=fake_refresh,
+        _ph=SimpleNamespace(replace=lambda value, _data: value),
+        settings={"volume": 100, "autoplay": False, "controller_msg": True},
+        volume=100,
+        position=60000,
+        do_next=fake_do_next,
+        channel=SimpleNamespace(mention="#music", members=[]),
+        node=SimpleNamespace(_available=True),
+        is_user_join=lambda _user: True,
+        current=SimpleNamespace(title="Song", author="Artist", requester=SimpleNamespace()),
+        shuffle_votes=set(),
+        resume_votes=set(),
+        pause_votes=set(),
+    )
+    interaction = SimpleNamespace(
+        user=SimpleNamespace(),
+        guild_id=123,
+        response=SimpleNamespace(defer=lambda: None),
+    )
+
+    async def fake_defer():
+        order.append("defer")
+
+    interaction.response.defer = fake_defer
+    monkeypatch.setattr("voicelink.views.controller.send_localized_message", fake_send_localized_message)
+    monkeypatch.setattr("voicelink.views.controller.LangHandler.get_lang", fake_get_lang)
+
+    button = button_cls(player=player, btn_data={"label": "x", "states": {"track": {"label": "track"}}})
+
+    asyncio.run(button.callback(interaction))
+
+    assert expected_prefix in order
+    assert order[-1] == "refresh_state"
+
+
+def test_volume_mute_button_refreshes_controller_after_state_change() -> None:
+    order: list[str] = []
+
+    async def fake_set_volume(value, requester=None):
+        order.append(f"volume:{value}")
+
+    async def fake_refresh(interaction=None):
+        order.append("refresh_state")
+
+    async def fake_defer():
+        order.append("defer")
+
+    player = SimpleNamespace(
+        current=SimpleNamespace(),
+        volume=100,
+        settings={"volume": 100},
+        is_privileged=lambda _user: True,
+        set_volume=fake_set_volume,
+        refresh_controller_for_state_change=fake_refresh,
+        _ph=SimpleNamespace(replace=lambda value, _data: value),
+    )
+    interaction = SimpleNamespace(user=SimpleNamespace(), response=SimpleNamespace(defer=fake_defer))
+    button = VolumeMute(
+        player=player,
+        btn_data={"label": "x", "states": {"mute": {"label": "Mute"}, "muted": {"label": "Unmute"}}},
+    )
+
+    asyncio.run(button.callback(interaction))
+
+    assert order == ["volume:0", "defer", "refresh_state"]
+
+
+def test_skip_button_sends_success_then_stops_playback(monkeypatch) -> None:
+    order: list[str] = []
+
+    async def fake_send_localized_message(*_args, **_kwargs):
+        order.append("message")
+        return None
+
+    async def fake_stop():
+        order.append("stop")
+
+    player = SimpleNamespace(
+        is_playing=True,
+        current=SimpleNamespace(requester=SimpleNamespace()),
+        is_privileged=lambda _user: True,
+        queue=SimpleNamespace(_repeat=SimpleNamespace(mode=voicelink.LoopType.OFF)),
+        stop=fake_stop,
+        skip_votes=set(),
+        required=lambda: 1,
+        settings={"controller_msg": True},
+        _ph=SimpleNamespace(replace=lambda value, _data: value),
+    )
+    interaction = SimpleNamespace(user=SimpleNamespace())
+    button = Skip(player=player, btn_data={"label": "skip"})
+    monkeypatch.setattr("voicelink.views.controller.send_localized_message", fake_send_localized_message)
+
+    asyncio.run(button.callback(interaction))
+
+    assert order == ["message", "stop"]
+
+
+def test_back_button_while_playing_sends_success_then_stops_playback(monkeypatch) -> None:
+    order: list[str] = []
+
+    async def fake_send_localized_message(*_args, **_kwargs):
+        order.append("message")
+        return None
+
+    async def fake_stop():
+        order.append("stop")
+
+    player = SimpleNamespace(
+        is_playing=True,
+        current=SimpleNamespace(),
+        is_privileged=lambda _user: True,
+        queue=SimpleNamespace(
+            history=lambda: ["old"],
+            backto=lambda index: order.append(f"backto:{index}"),
+            _repeat=SimpleNamespace(mode=voicelink.LoopType.OFF),
+        ),
+        stop=fake_stop,
+        previous_votes=set(),
+        required=lambda: 1,
+        settings={"controller_msg": True},
+        _ph=SimpleNamespace(replace=lambda value, _data: value),
+    )
+    interaction = SimpleNamespace(user=SimpleNamespace())
+    button = Back(player=player, btn_data={"label": "back"})
+    monkeypatch.setattr("voicelink.views.controller.send_localized_message", fake_send_localized_message)
+
+    asyncio.run(button.callback(interaction))
+
+    assert order == ["backto:2", "stop", "message"]
+
+
+def test_stop_button_sends_success_then_tears_down(monkeypatch) -> None:
+    order: list[str] = []
+
+    async def fake_send_localized_message(*_args, **_kwargs):
+        order.append("message")
+        return None
+
+    async def fake_teardown():
+        order.append("teardown")
+
+    player = SimpleNamespace(
+        is_privileged=lambda _user: True,
+        stop_votes=set(),
+        required=lambda leave=False: 1,
+        teardown=fake_teardown,
+        settings={"controller_msg": True},
+        _ph=SimpleNamespace(replace=lambda value, _data: value),
+    )
+    interaction = SimpleNamespace(user=SimpleNamespace())
+    button = Stop(player=player, btn_data={"label": "stop"})
+    monkeypatch.setattr("voicelink.views.controller.send_localized_message", fake_send_localized_message)
+
+    asyncio.run(button.callback(interaction))
+
+    assert order == ["message", "teardown"]
+
+
+def test_tracks_select_skips_to_selected_track_and_stops_playback(monkeypatch) -> None:
+    order: list[str] = []
+
+    async def fake_send_localized_message(*_args, **_kwargs):
+        order.append("message")
+        return None
+
+    async def fake_defer():
+        order.append("defer")
+
+    async def fake_stop():
+        order.append("stop")
+
+    queue_tracks = [
+        SimpleNamespace(title="Song 1", author="Artist", formatted_length="03:00", is_stream=False, emoji="🎵"),
+        SimpleNamespace(title="Song 2", author="Artist", formatted_length="03:00", is_stream=False, emoji="🎵"),
+    ]
+    player = SimpleNamespace(
+        queue=SimpleNamespace(
+            is_empty=False,
+            tracks=lambda: queue_tracks,
+            skipto=lambda index: order.append(f"skipto:{index}"),
+        ),
+        get_msg=lambda key: "LIVE" if key == "common.status.live" else key,
+        is_privileged=lambda _user: True,
+        stop=fake_stop,
+        settings={"controller_msg": True},
+        _ph=SimpleNamespace(replace=lambda value, _data: value),
+    )
+    interaction = SimpleNamespace(user=SimpleNamespace(), response=SimpleNamespace(defer=fake_defer))
+    select = Tracks(player=player, btn_data={"label": "chon bai"})
+    select._values = ["2. Song 2"]
+    monkeypatch.setattr("voicelink.views.controller.send_localized_message", fake_send_localized_message)
+
+    asyncio.run(select.callback(interaction))
+
+    assert order == ["defer", "skipto:2", "stop", "message"]
 
 
 def test_voice_status_cleanup_clears_status_even_when_cached_channel_status_is_missing() -> None:
