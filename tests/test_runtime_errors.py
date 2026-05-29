@@ -3,9 +3,11 @@ from __future__ import annotations
 import ast
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from cogs.listeners import sanitize_track_exception_message
 from voicelink.language import LangHandler
+from voicelink.player import Player
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -41,6 +43,14 @@ def test_player_add_track_does_not_return_from_finally() -> None:
 
     for try_node in (node for node in ast.walk(add_track) if isinstance(node, ast.Try)):
         assert not any(isinstance(node, ast.Return) for node in ast.walk(ast.Module(body=try_node.finalbody, type_ignores=[])))
+
+
+def test_player_human_member_check_ignores_undeafened_bots() -> None:
+    bot_member = SimpleNamespace(bot=True, voice=SimpleNamespace(self_deaf=False))
+    human_member = SimpleNamespace(bot=False, voice=SimpleNamespace(self_deaf=True))
+
+    assert Player._has_human_members([bot_member]) is False
+    assert Player._has_human_members([bot_member, human_member]) is True
 
 
 def test_default_language_is_vietnamese() -> None:

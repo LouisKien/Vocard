@@ -159,26 +159,30 @@ class MongoDBHandler:
 
         async with cls._lock:
             try:
-                # Remove expired entries from settings cache
-                expired_settings = [
-                    guild_id for guild_id, last_access in cls._last_access.items()
-                    if current_time - last_access > cls._CACHE_TTL and guild_id in cls._settings_buffer
+                expired_ids = [
+                    cache_id for cache_id, last_access in cls._last_access.items()
+                    if current_time - last_access > cls._CACHE_TTL
                 ]
-                logger.debug("Found %d expired cache entries.", len(expired_settings))
+                logger.debug("Found %d expired cache entries.", len(expired_ids))
 
-                for guild_id in expired_settings:
-                    del cls._settings_buffer[guild_id]
-                    del cls._last_access[guild_id]
-                    logger.debug("Removed expired cache for guild_id: %s", guild_id)
+                for cache_id in expired_ids:
+                    cls._settings_buffer.pop(cache_id, None)
+                    cls._users_buffer.pop(cache_id, None)
+                    cls._last_access.pop(cache_id, None)
+                    logger.debug("Removed expired cache for id: %s", cache_id)
 
-                # If still too large, remove oldest entries
-                while len(cls._settings_buffer) > cls._MAX_CACHE_SIZE:
+                # If still too large, remove oldest entries across both caches.
+                while len(cls._settings_buffer) + len(cls._users_buffer) > cls._MAX_CACHE_SIZE and cls._last_access:
                     oldest_id = min(cls._last_access.items(), key=lambda x: x[1])[0]
-                    del cls._settings_buffer[oldest_id]
-                    del cls._last_access[oldest_id]
+                    cls._settings_buffer.pop(oldest_id, None)
+                    cls._users_buffer.pop(oldest_id, None)
+                    cls._last_access.pop(oldest_id, None)
                     logger.warning("Cache size exceeded. Removed oldest entry: %s", oldest_id)
 
-                logger.info("Cache cleanup completed. Current cache size: %d", len(cls._settings_buffer))
+                logger.info(
+                    "Cache cleanup completed. Current cache size: %d",
+                    len(cls._settings_buffer) + len(cls._users_buffer)
+                )
 
             except Exception as e:
                 logger.error("Cache cleanup failed: %s", str(e), exc_info=True)

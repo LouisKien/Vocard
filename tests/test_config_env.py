@@ -56,6 +56,19 @@ def test_function_module_imports_without_settings_json() -> None:
     assert result.stdout.strip() == "ok"
 
 
+def test_settings_json_can_be_ignored_for_isolated_test_runs() -> None:
+    result = run_repo_python(
+        """
+from function import settings_override_exists
+print(settings_override_exists())
+""",
+        env=base_env(VOCARD_IGNORE_SETTINGS_JSON="true"),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "False"
+
+
 def test_load_settings_uses_defaults_and_env_overrides() -> None:
     env = base_env(
         DISCORD_TOKEN="discord-token",

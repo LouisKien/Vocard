@@ -642,6 +642,10 @@ class Player(VoiceProtocol):
             task.cancel()
         self._inactive_cleanup_task = None
 
+    @staticmethod
+    def _has_human_members(members) -> bool:
+        return any(not member.bot for member in members)
+
     def _schedule_inactive_cleanup_timer(self) -> None:
         """Schedules per-player cleanup after inactivity."""
         self._cancel_inactive_cleanup_timer()
@@ -677,7 +681,7 @@ class Player(VoiceProtocol):
         if not tracks:
             return 0
 
-        if self.channel.members and any(not member.bot for member in self.channel.members):
+        if self.channel.members and self._has_human_members(self.channel.members):
             self._cancel_inactive_cleanup_timer()
         if self.is_ipc_connected:
             await self.send_ws(
@@ -937,7 +941,7 @@ class Player(VoiceProtocol):
                 return
 
             members = self.channel.members if self.channel else []
-            has_non_bot = any(not m.bot or not m.voice.self_deaf for m in members)
+            has_non_bot = self._has_human_members(members)
             # Empty channel: always pause/teardown. If people remain: only when idle (not playing + empty queue).
             if has_non_bot and (self.is_playing or not self.queue.is_empty):
                 return
