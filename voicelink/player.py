@@ -158,6 +158,7 @@ class Player(VoiceProtocol):
         self._logger: Optional[logging.Logger] = self._node._logger
         self._inactive_cleanup_task: Optional[asyncio.Task[None]] = None
         self._background_tasks: set[asyncio.Task] = set()
+        self._tearing_down: bool = False
 
     def __repr__(self):
         return (
@@ -451,7 +452,7 @@ class Player(VoiceProtocol):
 
     async def invoke_controller(self):
         """Sends or updates the music controller message in the designated channel."""
-        if not self.settings.get('controller', True) or self._updating or not self.channel:
+        if not self.settings.get('controller', True) or self._updating or not self.channel or getattr(self, "_tearing_down", False):
             return
         self._updating = True
 
@@ -515,15 +516,28 @@ class Player(VoiceProtocol):
     
     async def teardown(self):
         """Cleans up the player and associated resources."""
+        if getattr(self, "_tearing_down", False):
+            return
+        self._tearing_down = True
         self._cancel_inactive_cleanup_timer()
+        self._cancel_background_tasks()
         controller = self.controller
+        voice_channel = self.channel
         sticky_controller_id = self.settings.get("music_request_channel", {}).get("controller_msg_id")
         keep_controller_message = bool(controller and controller.id == sticky_controller_id)
         inactive_embed = self.build_embed() if keep_controller_message else None
         played_time = round(self.settings.get("played_time", 0) + ((round(time.time()) - self.joinTime) / 60), 2)
 
         self._start_background_task(self._persist_teardown_state(played_time), "teardown_persist")
-        self._start_background_task(self._clear_voice_status_for_channel(self.channel), "voice_status")
+        try:
+            await self._clear_voice_status_for_channel(voice_channel)
+        except Exception as error:
+            if self._logger:
+                self._logger.warning(
+                    "Failed to clear voice status during teardown for guild %s",
+                    self.guild.id if self.guild else "unknown",
+                    exc_info=error,
+                )
         if controller:
             self._start_background_task(
                 self._cleanup_controller_message(
@@ -654,6 +668,13 @@ class Player(VoiceProtocol):
         if task and not task.done():
             task.cancel()
         self._inactive_cleanup_task = None
+
+    def _cancel_background_tasks(self) -> None:
+        current_task = asyncio.current_task()
+        for task in list(self._background_tasks):
+            if task is current_task or task.done():
+                continue
+            task.cancel()
 
     def _start_background_task(self, coro, label: str) -> Optional[asyncio.Task]:
         if not self.bot or not getattr(self.bot, "loop", None):
@@ -982,6 +1003,8 @@ class Player(VoiceProtocol):
     
     async def update_voice_status(self, remove_status: bool = False) -> None:
         """Updates the voice status of the channel based on the specified template."""
+        if getattr(self, "_tearing_down", False):
+            return
         template = self.settings.get("stage_announce_template", Config().voice_status_template)
         if not template or not self.channel:
             return

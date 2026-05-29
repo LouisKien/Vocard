@@ -260,6 +260,58 @@ def test_voice_status_cleanup_clears_status_even_when_cached_channel_status_is_m
     assert recorded["status"] is None
 
 
+def test_teardown_clears_voice_status_before_destroy() -> None:
+    order: list[str] = []
+
+    async def fake_clear_voice_status(channel):
+        order.append(f"clear:{channel.id}")
+
+    async def fake_destroy():
+        order.append("destroy")
+
+    fake_player = SimpleNamespace(
+        _cancel_inactive_cleanup_timer=lambda: None,
+        _cancel_background_tasks=lambda: order.append("cancel_background"),
+        controller=None,
+        settings={"played_time": 0, "music_request_channel": {}},
+        build_embed=lambda current=None: None,
+        joinTime=0,
+        _start_background_task=lambda coro, label: order.append(f"bg:{label}"),
+        _persist_teardown_state=lambda played_time: None,
+        _clear_voice_status_for_channel=fake_clear_voice_status,
+        _cleanup_controller_message=lambda controller, **kwargs: None,
+        is_ipc_connected=False,
+        destroy=fake_destroy,
+        channel=SimpleNamespace(id=321),
+        _tearing_down=False,
+        guild=SimpleNamespace(id=123),
+        _logger=logging.getLogger("test"),
+    )
+
+    asyncio.run(voicelink.Player.teardown(fake_player))
+
+    assert order[:3] == ["cancel_background", "bg:teardown_persist", "clear:321"]
+    assert order[-1] == "destroy"
+
+
+def test_update_voice_status_is_skipped_while_tearing_down() -> None:
+    recorded = {"called": False}
+
+    async def fake_edit(*, status=None):
+        recorded["called"] = True
+
+    fake_player = SimpleNamespace(
+        _tearing_down=True,
+        settings={},
+        channel=SimpleNamespace(type=discord.ChannelType.voice, edit=fake_edit),
+        _ph=SimpleNamespace(variables={}),
+    )
+
+    asyncio.run(voicelink.Player.update_voice_status(fake_player))
+
+    assert recorded["called"] is False
+
+
 def test_single_guild_sync_purges_legacy_global_commands() -> None:
     class _FakeCommandTree:
         def __init__(self) -> None:
