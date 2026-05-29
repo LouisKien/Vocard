@@ -25,14 +25,17 @@ import random
 import time
 import socket
 import discord
+import logging
 
 from itertools import zip_longest
-from typing import Dict, Optional, Union
+from typing import Any, Dict, Optional, Union
 from timeit import default_timer as timer
 from discord.ext import commands
 
 from .mongodb import MongoDBHandler
 from .language import LangHandler
+
+logger = logging.getLogger("vocard.dispatch")
 
 # __all__ = [
 #     "ExponentialBackoff",
@@ -304,6 +307,7 @@ async def dispatch_message(
     file: Optional[discord.File] = None,
     delete_after: Optional[float] = discord.utils.MISSING,
     ephemeral: bool = False,
+    settings: Optional[Dict[str, Any]] = None,
     requires_fetch: bool = False
 ) -> Optional[discord.Message]:
     """
@@ -325,6 +329,8 @@ async def dispatch_message(
     if not content:
         content = "No content provided."
 
+    started_at = timer()
+
     # Determine the text to send
     embed = content if isinstance(content, discord.Embed) else None
     text = None if embed else str(content).format(*params) if params else str(content)
@@ -338,7 +344,10 @@ async def dispatch_message(
     )
 
     # Check settings for delete_after duration
-    settings = await MongoDBHandler.get_settings(ctx.guild.id)
+    if settings is None:
+        settings = MongoDBHandler.get_cached_settings(ctx.guild.id)
+    if not settings:
+        settings = await MongoDBHandler.get_settings(ctx.guild.id)
     send_kwargs = {
         "content": text,
         "embed": embed,
@@ -369,6 +378,17 @@ async def dispatch_message(
     if requires_fetch and isinstance(message, (discord.WebhookMessage, discord.InteractionMessage)):
         message = await message.fetch()
 
+    elapsed_ms = round((timer() - started_at) * 1000, 2)
+    log = logger.info if elapsed_ms >= 150 else logger.debug
+    log(
+        "message_send_ms=%.2f guild_id=%s channel_id=%s has_embed=%s ephemeral=%s",
+        elapsed_ms,
+        getattr(ctx.guild, "id", "unknown"),
+        getattr(ctx.channel, "id", "unknown"),
+        embed is not None,
+        ephemeral,
+    )
+
     return message
 
 async def send_localized_message(
@@ -376,6 +396,7 @@ async def send_localized_message(
     content_key: str,
     *params,
     language: str = None,
+    settings: Optional[Dict[str, Any]] = None,
     **kwargs
 ) -> Optional[discord.Message]:
     """
@@ -394,7 +415,7 @@ async def send_localized_message(
     if language and language in LangHandler.get_all_languages():
         localized_text = LangHandler._get_lang(language, content_key)
     else:
-        localized_text = await LangHandler.get_lang(ctx.guild.id, content_key)
+        localized_text = await LangHandler.get_lang(ctx.guild.id, content_key, settings=settings)
     
     if localized_text:
         try:
@@ -404,4 +425,4 @@ async def send_localized_message(
     else:
         formatted_text = "Translation not found."
 
-    return await dispatch_message(ctx, content=formatted_text, **kwargs)
+    return await dispatch_message(ctx, content=formatted_text, settings=settings, **kwargs)

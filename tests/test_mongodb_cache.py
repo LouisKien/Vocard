@@ -71,3 +71,30 @@ def test_mongodb_pool_defaults_are_small_for_single_guild_homelab(monkeypatch) -
         MongoDBHandler._db = original_db
         MongoDBHandler._settings_db = original_settings_db
         MongoDBHandler._users_db = original_users_db
+
+
+def test_get_settings_cache_hit_does_not_require_global_lock(monkeypatch) -> None:
+    class _FailIfEnteredLock:
+        async def __aenter__(self):
+            raise AssertionError("cache hit should not enter the global MongoDB lock")
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    original_lock = MongoDBHandler._lock
+    original_buffer = copy.deepcopy(MongoDBHandler._settings_buffer)
+    original_last_access = copy.deepcopy(MongoDBHandler._last_access)
+    try:
+        MongoDBHandler._lock = _FailIfEnteredLock()
+        MongoDBHandler._settings_buffer = {321: {"_id": 321, "lang": "VN"}}
+        MongoDBHandler._last_access = {}
+        monkeypatch.setattr(MongoDBHandler, "_is_allowed_settings_guild", staticmethod(lambda guild_id: guild_id == 321))
+
+        settings = asyncio.run(MongoDBHandler.get_settings(321))
+
+        assert settings["lang"] == "VN"
+        assert 321 in MongoDBHandler._last_access
+    finally:
+        MongoDBHandler._lock = original_lock
+        MongoDBHandler._settings_buffer = original_buffer
+        MongoDBHandler._last_access = original_last_access

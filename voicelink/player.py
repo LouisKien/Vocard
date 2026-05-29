@@ -155,6 +155,7 @@ class Player(VoiceProtocol):
         self._ph = PlayerPlaceholder(client, self)
         self._logger: Optional[logging.Logger] = self._node._logger
         self._inactive_cleanup_task: Optional[asyncio.Task[None]] = None
+        self._background_tasks: set[asyncio.Task] = set()
 
     def __repr__(self):
         return (
@@ -400,6 +401,7 @@ class Player(VoiceProtocol):
 
     async def do_next(self):
         """Processes the next track in the queue."""
+        started_at = time.perf_counter()
         if self._current or self.is_playing or not self.channel:
             return
         
@@ -436,26 +438,25 @@ class Player(VoiceProtocol):
                 return await self.do_next()
 
             if not track.requester.bot:
-                self._bot.loop.create_task(MongoDBHandler.update_user(track.requester.id, {
-                    "$push": {"history": {"$each": [track.track_id], "$slice": -25}}
-                }))
+                self._start_background_task(
+                    self._persist_history_entry(track.requester.id, track.track_id),
+                    "history_write",
+                )
 
-        await self.invoke_controller()
-        await self.update_voice_status()
-
-        if self.is_ipc_connected:
-            await self.send_ws({
-                "op": "trackUpdate", 
-                "currentQueuePosition": self.queue._position if track else self.queue._position + 1,
-                "trackId": track.track_id if track else None,
-                "isPaused": self._paused
-            })
+        self._schedule_post_playback_updates(track)
+        self._log_stage_timing(
+            "do_next_ms",
+            started_at,
+            threshold_ms=400,
+            track_id=getattr(track, "identifier", None),
+            source=getattr(track, "source", None),
+        )
 
     async def invoke_controller(self):
         """Sends or updates the music controller message in the designated channel."""
         if not self.settings.get('controller', True) or self._updating or not self.channel:
             return
-        
+        started_at = time.perf_counter()
         self._updating = True
 
         try:            
@@ -492,6 +493,7 @@ class Player(VoiceProtocol):
         
         finally:
             self._updating = False
+            self._log_stage_timing("controller_update_ms", started_at, threshold_ms=200)
 
     async def is_position_fresh(self):
         """Checks if the current controller message is among the most recent messages."""
@@ -506,32 +508,34 @@ class Player(VoiceProtocol):
     
     async def teardown(self):
         """Cleans up the player and associated resources."""
-        try:
-            await MongoDBHandler.update_settings(self.guild.id, {"$set": {
-                "last_active": (timeNow := round(time.time())), 
-                "played_time": round(self.settings.get("played_time", 0) + ((timeNow - self.joinTime) / 60), 2)
-            }})
-            
-            if self.is_ipc_connected:
-                await self.send_ws({"op": "playerClose"})
-        except:
-            pass
+        started_at = time.perf_counter()
+        self._cancel_inactive_cleanup_timer()
+        controller = self.controller
+        sticky_controller_id = self.settings.get("music_request_channel", {}).get("controller_msg_id")
+        keep_controller_message = bool(controller and controller.id == sticky_controller_id)
+        inactive_embed = self.build_embed() if keep_controller_message else None
+        played_time = round(self.settings.get("played_time", 0) + ((round(time.time()) - self.joinTime) / 60), 2)
 
-        try:
-            await self.update_voice_status(remove_status=True)
-            self._cancel_inactive_cleanup_timer()
-            if self.controller:
-                if self.controller.id == self.settings.get("music_request_channel", {}).get("controller_msg_id"):
-                    await self.controller.edit(embed=self.build_embed(), view=None)
-                else: 
-                    await self.controller.delete()
-        except:
-            pass
+        self._start_background_task(self._persist_teardown_state(played_time), "teardown_persist")
+        self._start_background_task(self._clear_voice_status_for_channel(self.channel), "voice_status")
+        if controller:
+            self._start_background_task(
+                self._cleanup_controller_message(
+                    controller,
+                    keep_message=keep_controller_message,
+                    inactive_embed=inactive_embed,
+                ),
+                "controller_cleanup",
+            )
+        if self.is_ipc_connected:
+            self._start_background_task(self.send_ws({"op": "playerClose"}), "ipc_player_close")
 
         try:
             await self.destroy()
         except:
             pass
+        finally:
+            self._log_stage_timing("teardown_ms", started_at, threshold_ms=250)
 
     async def get_tracks(
         self,
@@ -561,8 +565,10 @@ class Player(VoiceProtocol):
             
     async def stop(self):
         """Stops the currently playing track."""
+        started_at = time.perf_counter()
         self._current = None
         await self.send(method=RequestMethod.PATCH, data={'encodedTrack': None})
+        self._log_stage_timing("stop_request_ms", started_at, threshold_ms=150)
 
     async def disconnect(self, *, force: bool = False):
         """Disconnects the player from voice."""
@@ -599,6 +605,7 @@ class Player(VoiceProtocol):
         """Plays a track."""
         if not self._node:
             return track
+        started_at = time.perf_counter()
 
         data = {
             "encodedTrack": track.track_id,
@@ -615,6 +622,13 @@ class Player(VoiceProtocol):
         self._current = track
 
         self._logger.debug(f"Player in {self.guild.name}({self.guild.id}) playing {track.title} from uri {track.uri} with a length of {track.length}")
+        self._log_stage_timing(
+            "play_request_ms",
+            started_at,
+            threshold_ms=250,
+            track_id=track.identifier,
+            source=track.source,
+        )
         return self._current
 
     def _validate_time(self, track: Track, start_time: int, end_time: int) -> None:
@@ -641,6 +655,93 @@ class Player(VoiceProtocol):
         if task and not task.done():
             task.cancel()
         self._inactive_cleanup_task = None
+
+    def _log_stage_timing(self, stage: str, started_at: float, *, threshold_ms: float = 250, **fields) -> float:
+        elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
+        if not self._logger:
+            return elapsed_ms
+
+        field_text = " ".join(
+            f"{key}={value!r}"
+            for key, value in fields.items()
+            if value not in (None, "", [])
+        )
+        message = f"{stage}={elapsed_ms:.2f}ms guild_id={self.guild.id if self.guild else 'unknown'}"
+        if field_text:
+            message = f"{message} {field_text}"
+
+        log = self._logger.info if elapsed_ms >= threshold_ms else self._logger.debug
+        log(message)
+        return elapsed_ms
+
+    def _start_background_task(self, coro, label: str) -> Optional[asyncio.Task]:
+        if not self.bot or not getattr(self.bot, "loop", None):
+            return None
+
+        task = self.bot.loop.create_task(self._run_background_task(coro, label))
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+        return task
+
+    async def _run_background_task(self, coro, label: str):
+        started_at = time.perf_counter()
+        try:
+            return await coro
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            if self._logger:
+                self._logger.warning(
+                    "Background side-effect failed: %s guild_id=%s",
+                    label,
+                    self.guild.id if self.guild else "unknown",
+                    exc_info=e,
+                )
+        finally:
+            self._log_stage_timing(f"{label}_ms", started_at, threshold_ms=300)
+
+    async def _persist_history_entry(self, requester_id: int, track_id: str) -> None:
+        await MongoDBHandler.update_user(requester_id, {
+            "$push": {"history": {"$each": [track_id], "$slice": -25}}
+        })
+
+    async def _persist_teardown_state(self, played_time: float) -> None:
+        await MongoDBHandler.update_settings(self.guild.id, {"$set": {
+            "last_active": round(time.time()),
+            "played_time": played_time,
+        }})
+
+    async def _clear_voice_status_for_channel(self, channel: Optional[VoiceChannel]) -> None:
+        if not channel or channel.type != ChannelType.voice:
+            return
+        if getattr(channel, "status", None) in (None, ""):
+            return
+        await channel.edit(status=None)
+
+    async def _cleanup_controller_message(
+        self,
+        controller: Union[Message, PartialMessage, None],
+        *,
+        keep_message: bool,
+        inactive_embed=None,
+    ) -> None:
+        if not controller:
+            return
+        if keep_message:
+            await controller.edit(embed=inactive_embed, view=None)
+        else:
+            await controller.delete()
+
+    def _schedule_post_playback_updates(self, track: Optional[Track]) -> None:
+        self._start_background_task(self.invoke_controller(), "controller_side_effect")
+        self._start_background_task(self.update_voice_status(), "voice_status_side_effect")
+        if self.is_ipc_connected:
+            self._start_background_task(self.send_ws({
+                "op": "trackUpdate",
+                "currentQueuePosition": self.queue._position if track else self.queue._position + 1,
+                "trackId": track.track_id if track else None,
+                "isPaused": self._paused,
+            }), "ipc_track_update")
 
     @staticmethod
     def _has_human_members(members) -> bool:
@@ -721,7 +822,7 @@ class Player(VoiceProtocol):
 
     async def set_pause(self, pause: bool, requester: Member = None) -> bool:
         """Sets the pause state of the currently playing track."""
-
+        started_at = time.perf_counter()
         self._paused = pause
         self.pause_votes.clear() if pause else self.resume_votes.clear()
         await self.send(method=RequestMethod.PATCH, data={"paused": pause})
@@ -730,6 +831,7 @@ class Player(VoiceProtocol):
             await self.send_ws({"op": "updatePause", "pause": pause}, requester)
         
         self._logger.debug(f"Player in {self.guild.name}({self.guild.id}) has been {'paused' if pause else 'resumed'}.")
+        self._log_stage_timing("pause_request_ms", started_at, threshold_ms=150, pause=pause)
         return self._paused
 
     async def set_volume(self, volume: int, requester: Member = None) -> int:
@@ -909,14 +1011,23 @@ class Player(VoiceProtocol):
         template = self.settings.get("stage_announce_template", Config().voice_status_template)
         if not template or not self.channel:
             return
-        
+        started_at = time.perf_counter()
         try:
             rv = {key: func() if callable(func) else func for key, func in self._ph.variables.items()}
             status = None if remove_status else self._ph.replace(text=template, variables=rv)
-            # if self.channel.status != status:
+            if getattr(self.channel, "status", None) == status:
+                return
             if self.channel.type == ChannelType.voice:
                 await self.channel.edit(status=status)
 
+        except errors.Forbidden:
+            self._logger.warning(
+                "Missing permission to update voice status in channel '%s' (%s) for guild '%s' (%s)",
+                self.channel.name,
+                self.channel.id,
+                self.channel.guild,
+                self.channel.guild.id,
+            )
         except Exception as e:
             self._logger.error(
                 f"Failed to update voice status in channel '{self.channel.name}' "
@@ -924,6 +1035,8 @@ class Player(VoiceProtocol):
                 f"({self.channel.guild.id})", 
                 exc_info=e
             )
+        finally:
+            self._log_stage_timing("voice_status_ms", started_at, threshold_ms=200, remove_status=remove_status)
 
     async def send_ws(self, payload, requester: Member = None):
         """Sends a WebSocket payload to the bot's IPC (Inter-Process Communication) system."""

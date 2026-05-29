@@ -26,6 +26,7 @@ import time
 import asyncio
 import logging
 import os
+from timeit import default_timer as timer
 
 from typing import Any, Dict, Optional, Literal, TypedDict, List
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection
@@ -302,6 +303,7 @@ class MongoDBHandler:
             if guild_id not in cls._settings_buffer:
                 return {}
 
+            cls._last_access[guild_id] = time.time()
             return copy.deepcopy(cls._settings_buffer[guild_id])
 
         except Exception as e:
@@ -328,9 +330,14 @@ class MongoDBHandler:
         Raises:
             ConnectionError: If database operation fails
         """
+        started_at = timer()
         try:
             if not cls._is_allowed_settings_guild(guild_id):
                 return {}
+            if not force_refresh and guild_id in cls._settings_buffer:
+                cls._last_access[guild_id] = time.time()
+                buffer = cls._settings_buffer[guild_id]
+                return copy.deepcopy(buffer) if deep_copy else buffer
             async with cls._lock:
                 # Check if we need fresh data
                 if force_refresh or guild_id not in cls._settings_buffer:
@@ -350,6 +357,10 @@ class MongoDBHandler:
 
         except Exception as e:
             raise ConnectionError(f"Failed to retrieve settings: {str(e)}")
+        finally:
+            elapsed_ms = round((timer() - started_at) * 1000, 2)
+            log = logger.info if elapsed_ms >= 50 else logger.debug
+            log("settings_read_ms=%.2f guild_id=%s force_refresh=%s", elapsed_ms, guild_id, force_refresh)
 
     @classmethod
     async def update_settings(

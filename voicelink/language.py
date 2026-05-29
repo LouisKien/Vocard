@@ -141,7 +141,12 @@ class LangHandler:
         return values
 
     @classmethod
-    async def get_lang(cls, guild_id: int, *keys) -> Optional[Union[list[str], str]]:
+    async def get_lang(
+        cls,
+        guild_id: int,
+        *keys,
+        settings: Optional[dict] = None,
+    ) -> Optional[Union[list[str], str]]:
         """
         Fetch the language setting for a guild from the database and return
         the requested string(s).
@@ -153,7 +158,10 @@ class LangHandler:
         Returns:
             str | list[str] | None: The requested string(s).
         """
-        settings = await MongoDBHandler.get_settings(guild_id)
+        if settings is None:
+            settings = MongoDBHandler.get_cached_settings(guild_id)
+        if not settings:
+            settings = await MongoDBHandler.get_settings(guild_id)
         lang = settings.get("lang", LangHandler._default_lang)
         return cls._get_lang(lang, *keys)
 
