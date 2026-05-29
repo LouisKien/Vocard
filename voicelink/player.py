@@ -27,6 +27,7 @@ import time, logging, asyncio
 
 from math import ceil
 from random import shuffle, choice
+from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Union, Tuple, TYPE_CHECKING
 
 from discord import (
@@ -48,6 +49,7 @@ from . import events
 from .config import Config
 from .pool import Node, NodePool
 from .objects import Track, Playlist
+from .spotify_fastpath import SpotifyPlaylistSeed, trim_seeded_track_from_playlist
 from .filters import Filter, Filters
 from .enums import SearchType, LoopType, RequestMethod
 from .events import VoicelinkEvent, TrackEndEvent, TrackStartEvent, TrackExceptionEvent
@@ -57,7 +59,7 @@ from .queue import Queue, QUEUE_TYPES
 from .mongodb import MongoDBHandler
 from .language import LangHandler
 from .views import InteractiveController
-from .utils import format_ms, dispatch_message
+from .utils import TempCtx, format_ms, dispatch_message, send_localized_message
 
 if TYPE_CHECKING:
     from .ipc import IPCClient
@@ -732,6 +734,59 @@ class Player(VoiceProtocol):
         else:
             await controller.delete()
 
+    async def _backfill_spotify_playlist(
+        self,
+        *,
+        message_ctx: TempCtx,
+        query: str,
+        requester: Member,
+        seeded_track: Track,
+        seed: SpotifyPlaylistSeed,
+        anchor_position: int,
+        start_time: int = 0,
+        end_time: int = 0,
+    ) -> None:
+        playlist = await self._node.get_tracks(
+            query,
+            requester=requester,
+            search_type=SearchType.SPOTIFY,
+        )
+        if not isinstance(playlist, Playlist):
+            return
+
+        remaining_tracks = trim_seeded_track_from_playlist(playlist, seeded_track)
+        existing_uris = [] if self.queue._allow_duplicate else [track.uri for track in self.queue._queue]
+        inserted_tracks: list[Track] = []
+        next_position = anchor_position
+        for track in remaining_tracks:
+            if not self.queue._allow_duplicate and track.uri in existing_uris:
+                continue
+
+            self._validate_time(track, start_time, end_time)
+            self.queue.put_at_index(next_position, track)
+            inserted_tracks.append(track)
+            existing_uris.append(track.uri)
+            next_position += 1
+
+        if inserted_tracks and self.is_ipc_connected:
+            await self.send_ws(
+                {
+                    "op": "addTrack",
+                    "tracks": [track.track_id for track in inserted_tracks],
+                    "position": anchor_position,
+                },
+                requester,
+            )
+
+        await send_localized_message(
+            message_ctx,
+            "player.playback.playlistLoad",
+            playlist.name or seed.name,
+            playlist.track_count or seed.track_count,
+            settings=self.settings,
+        )
+        await self.invoke_controller()
+
     def _schedule_post_playback_updates(self, track: Optional[Track]) -> None:
         self._start_background_task(self.invoke_controller(), "controller_side_effect")
         self._start_background_task(self.update_voice_status(), "voice_status_side_effect")
@@ -746,6 +801,78 @@ class Player(VoiceProtocol):
     @staticmethod
     def _has_human_members(members) -> bool:
         return any(not member.bot for member in members)
+
+    async def try_start_spotify_playlist_fast(
+        self,
+        ctx: Union[commands.Context, Interaction, TempCtx],
+        query: str,
+        requester: Member,
+        *,
+        start_time: int = 0,
+        end_time: int = 0,
+        at_front: bool = False,
+    ):
+        if not self._node:
+            return None
+
+        seed: Optional[SpotifyPlaylistSeed] = await self._node.get_spotify_playlist_seed(query)
+        if not seed:
+            return None
+
+        try:
+            tracks = await self._node.get_tracks(
+                seed.first_track_url,
+                requester=requester,
+                search_type=SearchType.SPOTIFY,
+            )
+        except Exception as error:
+            if self._logger:
+                self._logger.warning(
+                    "Spotify fast-path first-track lookup failed for guild_id=%s query=%r",
+                    self.guild.id if self.guild else "unknown",
+                    query,
+                    exc_info=error,
+                )
+            return None
+
+        if not tracks or isinstance(tracks, Playlist):
+            return None
+
+        first_track = tracks[0]
+        queue_position = await self.add_track(
+            first_track,
+            start_time=start_time,
+            end_time=end_time,
+            at_front=at_front,
+        )
+
+        started_playback = False
+        if not self.is_playing:
+            await self.do_next()
+            started_playback = True
+
+        anchor_position = 1 if started_playback else queue_position + 1
+        message_ctx = ctx if isinstance(ctx, TempCtx) else TempCtx(author=requester, channel=ctx.channel)
+        self._start_background_task(
+            self._backfill_spotify_playlist(
+                message_ctx=message_ctx,
+                query=query,
+                requester=requester,
+                seeded_track=first_track,
+                seed=seed,
+                anchor_position=anchor_position,
+                start_time=start_time,
+                end_time=end_time,
+            ),
+            "spotify_playlist_backfill",
+        )
+
+        return SimpleNamespace(
+            first_track=first_track,
+            queue_position=0 if started_playback else queue_position,
+            playlist_name=seed.name,
+            track_count=seed.track_count,
+        )
 
     def _schedule_inactive_cleanup_timer(self) -> None:
         """Schedules per-player cleanup after inactivity."""

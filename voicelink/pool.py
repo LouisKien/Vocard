@@ -48,6 +48,7 @@ from .exceptions import (
     TrackLoadError
 )
 from .objects import Playlist, Track
+from .spotify_fastpath import SpotifyFastPathClient
 from .utils import ExponentialBackoff, NodeStats, NodeInfo, Ping
 from .enums import RequestMethod
 from .ratelimit import YTRatelimit, YTToken, STRATEGY
@@ -119,6 +120,7 @@ class Node:
         self._info: Optional[NodeInfo] = None
         self._lavasrc_spotify_partner_api: Optional[bool] = None
         self._lavasrc_spotify_config_lock = asyncio.Lock()
+        self._spotify_fastpath = SpotifyFastPathClient(self._session, logger=self._logger)
         
         self.yt_ratelimit: Optional[YTRatelimit] = STRATEGY.get(yt_ratelimit.get("strategy"))(self, yt_ratelimit) if yt_ratelimit and yt_ratelimit.get("tokens") else None
 
@@ -472,6 +474,19 @@ class Node:
                     raise NodeException(f"Unable to update LavaSrc Spotify config: {body}")
 
             self._lavasrc_spotify_partner_api = enabled
+
+    async def get_spotify_playlist_seed(self, query: str):
+        try:
+            return await self._spotify_fastpath.get_playlist_seed(query)
+        except Exception as error:
+            if self._logger:
+                self._logger.warning(
+                    "Spotify fast-path seed lookup failed on node [%s] for query=%r",
+                    self._identifier,
+                    query,
+                    exc_info=error,
+                )
+            return None
 
     async def get_tracks(
         self,
