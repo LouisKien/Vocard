@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 from types import SimpleNamespace
 
+import discord
 import voicelink
 
 from cogs.basic import Basic
@@ -240,6 +241,23 @@ def test_invoke_controller_uses_channel_context_instead_of_interaction_response(
 
     assert isinstance(captured["ctx"], TempCtx)
     assert captured["ctx"].channel is fake_channel
+
+
+def test_voice_status_cleanup_clears_status_even_when_cached_channel_status_is_missing() -> None:
+    recorded = {}
+
+    async def fake_edit(*, status=None):
+        recorded["status"] = status
+
+    channel = SimpleNamespace(
+        type=discord.ChannelType.voice,
+        status=None,
+        edit=fake_edit,
+    )
+
+    asyncio.run(voicelink.Player._clear_voice_status_for_channel(SimpleNamespace(), channel))
+
+    assert recorded["status"] is None
 
 
 def test_single_guild_sync_purges_legacy_global_commands() -> None:

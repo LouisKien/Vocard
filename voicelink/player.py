@@ -692,8 +692,6 @@ class Player(VoiceProtocol):
     async def _clear_voice_status_for_channel(self, channel: Optional[VoiceChannel]) -> None:
         if not channel or channel.type != ChannelType.voice:
             return
-        if getattr(channel, "status", None) in (None, ""):
-            return
         await channel.edit(status=None)
 
     async def _cleanup_controller_message(
