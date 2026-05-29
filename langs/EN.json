@@ -64,6 +64,7 @@
             "nowplayingDesc": "**Now Playing:**\n```{0}```",
             "nowplayingField": "Up Next:",
             "nowplayingLink": "Listen on {0}",
+            "spotifyPlaylistLoading": "⏳ Spotify playlist is loading. This can take a little while, please wait...",
             "playlistLoad": " 🎶 Added the playlist **{0}** with `{1}` songs to the queue.",
             "trackLoad": "Added **[{0}](<{1}>)** by **{2}** (`{3}`) to begin playing.\n",
             "trackLoadPos": "Added **[{0}](<{1}>)** by **{2}** (`{3}`) to the queue at position **{4}**\n"

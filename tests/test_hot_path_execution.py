@@ -55,7 +55,7 @@ class _FakePlayer:
     def is_privileged(self, _author) -> bool:
         return True
 
-    async def get_tracks(self, _query, requester=None):
+    async def get_tracks(self, _query, requester=None, search_type=None):
         self.order.append("get_tracks")
         return self._tracks
 
@@ -72,6 +72,9 @@ class _FakePlayer:
 
     async def set_repeat(self, mode):
         self.order.append(f"repeat:{mode.name}")
+
+    def get_msg(self, *_keys):
+        return ("LIVE", "TRACK_LOAD_POS", "TRACK_LOAD")
 
 
 def _make_playlist() -> voicelink.Playlist:
@@ -111,6 +114,87 @@ def test_play_starts_playlist_playback_before_sending_confirmation(monkeypatch) 
     asyncio.run(Basic.play.callback(cog, ctx, query="spotify-playlist", start="0", end="0"))
 
     assert player.order.index("do_next") < player.order.index("message")
+
+
+def test_play_sends_spotify_playlist_loading_notice_before_lookup_and_cleans_it_up(monkeypatch) -> None:
+    player = _FakePlayer(tracks=_make_playlist(), is_playing=False)
+    ctx = SimpleNamespace(
+        guild=SimpleNamespace(voice_client=player, id=123),
+        author=SimpleNamespace(mention="@user"),
+        interaction=None,
+    )
+    cog = Basic(_FakeBot())
+
+    class _LoadingMessage:
+        async def delete(self):
+            player.order.append("delete_loading")
+
+    async def fake_send_localized_message(*_args, **_kwargs):
+        key = _args[1]
+        if key == "player.playback.spotifyPlaylistLoading":
+            player.order.append("loading")
+            return _LoadingMessage()
+        if key == "player.playback.playlistLoad":
+            player.order.append("playlistLoad")
+        return None
+
+    monkeypatch.setattr("cogs.basic.send_localized_message", fake_send_localized_message)
+
+    asyncio.run(
+        Basic.play.callback(
+            cog,
+            ctx,
+            query="https://open.spotify.com/playlist/37i9dQZF1DWVOaOWiVD1Lf?si=test",
+            start="0",
+            end="0",
+        )
+    )
+
+    assert player.order.index("loading") < player.order.index("get_tracks")
+    assert player.order.index("get_tracks") < player.order.index("delete_loading")
+    assert player.order.index("delete_loading") < player.order.index("playlistLoad")
+
+
+def test_play_does_not_send_spotify_playlist_loading_notice_for_spotify_track(monkeypatch) -> None:
+    track = SimpleNamespace(
+        title="Beauty And A Beat",
+        uri="https://open.spotify.com/track/190jyVPHYjAqEaOGmMzdyk",
+        author="Justin Bieber",
+        formatted_length="03:47",
+        is_stream=False,
+    )
+    player = _FakePlayer(tracks=[track], is_playing=False)
+    ctx = SimpleNamespace(
+        guild=SimpleNamespace(voice_client=player, id=123),
+        author=SimpleNamespace(mention="@user"),
+        interaction=None,
+    )
+    cog = Basic(_FakeBot())
+    sent_keys: list[str] = []
+
+    async def fake_send_localized_message(*_args, **_kwargs):
+        sent_keys.append(_args[1])
+        return None
+
+    async def fake_dispatch_message(*_args, **_kwargs):
+        sent_keys.append("dispatch")
+        return None
+
+    monkeypatch.setattr("cogs.basic.send_localized_message", fake_send_localized_message)
+    monkeypatch.setattr("cogs.basic.dispatch_message", fake_dispatch_message)
+
+    asyncio.run(
+        Basic.play.callback(
+            cog,
+            ctx,
+            query="https://open.spotify.com/track/190jyVPHYjAqEaOGmMzdyk?si=test",
+            start="0",
+            end="0",
+        )
+    )
+
+    assert "player.playback.spotifyPlaylistLoading" not in sent_keys
+    assert "dispatch" in sent_keys
 
 
 def test_skip_stops_audio_before_sending_confirmation(monkeypatch) -> None:

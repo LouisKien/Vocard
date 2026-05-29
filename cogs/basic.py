@@ -25,6 +25,7 @@ import re
 import discord
 import voicelink
 
+from contextlib import suppress
 from io import StringIO
 from validators import url
 from discord import app_commands
@@ -38,6 +39,11 @@ from function import (
 from voicelink import MongoDBHandler, LangHandler, Config
 from voicelink.views import SearchView, QueueView, LinkView, LyricsView, HelpView
 from voicelink.utils import format_ms, format_to_ms, truncate_string, dispatch_message, send_localized_message
+
+SPOTIFY_PLAYLIST_URL_REGEX = re.compile(
+    r"^https?://open\.spotify\.com/playlist/[A-Za-z0-9]+(?:\?.*)?$",
+    re.IGNORECASE,
+)
 
 async def nowplay(ctx: commands.Context, player: voicelink.Player):
     track = player.current
@@ -75,6 +81,42 @@ class Basic(commands.Cog):
 
     async def cog_unload(self) -> None:
         self.bot.tree.remove_command(self.ctx_menu.name, type=self.ctx_menu.type)
+
+    @staticmethod
+    def _is_spotify_playlist_query(query: str) -> bool:
+        return bool(SPOTIFY_PLAYLIST_URL_REGEX.match(query.strip()))
+
+    @staticmethod
+    async def _dismiss_temporary_message(message: discord.Message | None) -> None:
+        if not message or not hasattr(message, "delete"):
+            return
+
+        with suppress(discord.HTTPException, discord.NotFound, AttributeError):
+            await message.delete()
+
+    async def _get_tracks_with_loading_notice(
+        self,
+        ctx: commands.Context | discord.Interaction,
+        player: voicelink.Player,
+        *,
+        query: str,
+        requester: discord.Member | discord.User,
+        settings: dict,
+        search_type: voicelink.SearchType | None = None,
+    ):
+        loading_message = None
+        if self._is_spotify_playlist_query(query):
+            loading_message = await send_localized_message(
+                ctx,
+                "player.playback.spotifyPlaylistLoading",
+                settings=settings,
+                delete_after=None,
+            )
+
+        try:
+            return await player.get_tracks(query, requester=requester, search_type=search_type)
+        finally:
+            await self._dismiss_temporary_message(loading_message)
 
     async def help_autocomplete(self, interaction: discord.Interaction, current: str) -> list:
         return [app_commands.Choice(name=c.capitalize(), value=c) for c in self.bot.cogs if c not in ["Nodes", "Task"] and current in c]
@@ -137,7 +179,13 @@ class Basic(commands.Cog):
             return await send_localized_message(ctx, "voice.connection.notInChannel", ctx.author.mention, player.channel.mention, ephemeral=True)
         settings = player.settings
 
-        tracks = await player.get_tracks(query, requester=ctx.author)
+        tracks = await self._get_tracks_with_loading_notice(
+            ctx,
+            player,
+            query=query,
+            requester=ctx.author,
+            settings=settings,
+        )
         if not tracks:
             return await send_localized_message(ctx, "player.errors.noTrackFound", settings=settings)
 
@@ -187,7 +235,13 @@ class Basic(commands.Cog):
 
         await interaction.response.defer()
         settings = player.settings
-        tracks = await player.get_tracks(query, requester=interaction.user)
+        tracks = await self._get_tracks_with_loading_notice(
+            interaction,
+            player,
+            query=query,
+            requester=interaction.user,
+            settings=settings,
+        )
         if not tracks:
             return await send_localized_message(interaction, "player.errors.noTrackFound", settings=settings)
 

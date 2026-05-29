@@ -64,6 +64,7 @@
             "nowplayingDesc": "**Đang Phát:**\n```{0}```",
             "nowplayingField": "Tiếp Theo:",
             "nowplayingLink": "Nghe trên {0}",
+            "spotifyPlaylistLoading": "⏳ Đang tải playlist Spotify. Việc này có thể mất một lúc, vui lòng chờ...",
             "playlistLoad": " 🎶 Đã thêm playlist **{0}** với `{1}` bài hát vào hàng đợi.",
             "trackLoad": "Đã thêm **[{0}](<{1}>)** bởi **{2}** (`{3}`) để bắt đầu phát.\n",
             "trackLoadPos": "Đã thêm **[{0}](<{1}>)** bởi **{2}** (`{3}`) vào hàng đợi ở vị trí **{4}**\n"
