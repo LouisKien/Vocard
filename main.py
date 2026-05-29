@@ -50,6 +50,9 @@ class Translator(discord.app_commands.Translator):
         locale: discord.Locale,
         context: discord.app_commands.TranslationContext
     ) -> str | None:
+        if not func.should_translate_app_command_context(context.location):
+            return None
+
         locale_key = str(locale).upper()
         local_translations = LangHandler._local_langs.get(locale_key)
         if not local_translations:

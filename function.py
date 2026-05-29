@@ -27,6 +27,7 @@ import os
 import logging
 import voicelink
 import tempfile
+import discord
 
 from pathlib import Path
 from discord.ext import commands
@@ -224,3 +225,11 @@ def cooldown_check(ctx: commands.Context) -> Optional[commands.Cooldown]:
 
 def get_aliases(name: str) -> list:
     return voicelink.Config().aliases_settings.get(name, [])
+
+
+def should_translate_app_command_context(location: discord.app_commands.TranslationContextLocation) -> bool:
+    return location in {
+        discord.app_commands.TranslationContextLocation.command_description,
+        discord.app_commands.TranslationContextLocation.group_description,
+        discord.app_commands.TranslationContextLocation.parameter_description,
+    }

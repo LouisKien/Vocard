@@ -4,12 +4,15 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import discord
+
 from voicelink.config import (
     Config,
     LOCALIZED_DEFAULT_VOICE_STATUS_TEMPLATE,
     normalize_controller_settings,
     normalize_voice_status_template,
 )
+from function import should_translate_app_command_context
 from voicelink.language import LangHandler
 from voicelink.placeholders import PlayerPlaceholder
 from voicelink.views.help import HelpView
@@ -50,10 +53,20 @@ def test_vietnamese_runtime_language_pack_includes_new_discord_ui_keys() -> None
 def test_vietnamese_local_command_descriptions_stay_translated_without_renaming_commands() -> None:
     vi_localization = json.loads((ROOT / "local_langs" / "vi.json").read_text(encoding="utf8"))
 
-    assert vi_localization["play"] == "phat"
     assert vi_localization["playlist"] == "playlist"
     assert vi_localization["Grant or revoke permissions for a playlist."] == "Cấp hoặc thu hồi quyền cho playlist."
     assert vi_localization["Toggles the music controller."] == "Bật/tắt bảng điều khiển nhạc."
+
+
+def test_only_app_command_descriptions_are_translated() -> None:
+    assert should_translate_app_command_context(discord.app_commands.TranslationContextLocation.command_name) is False
+    assert should_translate_app_command_context(discord.app_commands.TranslationContextLocation.group_name) is False
+    assert should_translate_app_command_context(discord.app_commands.TranslationContextLocation.parameter_name) is False
+    assert should_translate_app_command_context(discord.app_commands.TranslationContextLocation.choice_name) is False
+    assert should_translate_app_command_context(discord.app_commands.TranslationContextLocation.command_description) is True
+    assert should_translate_app_command_context(discord.app_commands.TranslationContextLocation.group_description) is True
+    assert should_translate_app_command_context(discord.app_commands.TranslationContextLocation.parameter_description) is True
+    assert should_translate_app_command_context(discord.app_commands.TranslationContextLocation.other) is False
 
 
 def test_ui_source_files_no_longer_contain_known_english_discord_labels() -> None:

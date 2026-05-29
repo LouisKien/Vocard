@@ -86,34 +86,10 @@ def test_default_language_is_vietnamese() -> None:
 def test_vietnamese_slash_command_localization_exists() -> None:
     vi_localization = json.loads((ROOT / "local_langs" / "vi.json").read_text(encoding="utf8"))
 
-    assert vi_localization["play"] == "phat"
     assert vi_localization["Loads your input into the queue."] == "Thêm nội dung bạn nhập vào hàng đợi."
-    assert vi_localization["settings"] == "cai_dat"
     assert vi_localization["Deezer"] == "Deezer"
     assert vi_localization["Lists all the bot commands."] == "Liệt kê toàn bộ lệnh của bot."
     assert vi_localization["Stage announce template"] == "Mẫu thông báo sân khấu"
     assert vi_localization["Which setting to restore to defaults."] == "Chọn cài đặt cần khôi phục về mặc định."
     reference_localization = json.loads((ROOT / "local_langs" / "es-ES.json").read_text(encoding="utf8"))
     assert set(reference_localization) <= set(vi_localization)
-
-
-def test_vietnamese_playlist_subcommand_names_are_unique() -> None:
-    vi_localization = json.loads((ROOT / "local_langs" / "vi.json").read_text(encoding="utf8"))
-    playlist_commands = [
-        "play",
-        "view",
-        "create",
-        "delete",
-        "share",
-        "permission",
-        "rename",
-        "inbox",
-        "add",
-        "remove",
-        "clear",
-        "export",
-        "import",
-    ]
-    translated_names = [vi_localization.get(name, name) for name in playlist_commands]
-
-    assert len(translated_names) == len(set(translated_names))
