@@ -251,7 +251,7 @@
             "informationTitle": "📰 Information:",
             "informationBody": "{0} is a simple music bot. It leads to a comfortable experience which is user-friendly, It supports Soundcloud, Spotify, Twitch and more!",
             "getStartedTitle": "Get Started",
-            "getStartedBody": "Join a voice channel and /play {Song/URL} a song. (Names, video links, or playlist links are supported on {0})",
+            "getStartedBody": "Join a voice channel and use /play <Song/URL> to start music. (Names, video links, or playlist links are supported on {0})",
             "categoryTitle": "Category: {0}",
             "commandsTitle": "{0} Commands: [{1}]",
             "tutorialBody": "How to use Vocard? Watch this video for the basic commands and flow.",

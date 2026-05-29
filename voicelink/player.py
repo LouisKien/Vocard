@@ -59,7 +59,7 @@ from .queue import Queue, QUEUE_TYPES
 from .mongodb import MongoDBHandler
 from .language import LangHandler
 from .views import InteractiveController
-from .utils import format_ms, dispatch_message
+from .utils import format_ms, dispatch_message, TempCtx
 
 if TYPE_CHECKING:
     from .ipc import IPCClient
@@ -457,9 +457,19 @@ class Player(VoiceProtocol):
 
         try:            
             embed, view = self.build_embed(self.current), InteractiveController(self)
+            request_channel_data = self.settings.get("music_request_channel") or {}
+            request_channel = None
+            target_channel = None
+            if request_channel_data:
+                request_channel = self.bot.get_channel(request_channel_data.get("text_channel_id"))
+                target_channel = request_channel
+            if target_channel is None:
+                target_channel = getattr(self.context, "channel", None)
+            controller_ctx = TempCtx(self.dj, target_channel) if target_channel else None
+
             if not self.controller:
-                if request_channel_data := self.settings.get("music_request_channel"):
-                    if channel := self.bot.get_channel(request_channel_data.get("text_channel_id")):
+                if request_channel_data:
+                    if channel := request_channel:
                         try:
                             self.controller = await channel.fetch_message(request_channel_data.get("controller_msg_id"))
                             await self.controller.edit(embed=embed, view=view)
@@ -468,7 +478,8 @@ class Player(VoiceProtocol):
                 
                 # Send a new controller message if none exists
                 if not self.controller:
-                    self.controller = await dispatch_message(self.context, content=embed, view=view, delete_after=None, requires_fetch=True)
+                    if controller_ctx:
+                        self.controller = await dispatch_message(controller_ctx, content=embed, view=view, delete_after=None, requires_fetch=True)
 
             elif not await self.is_position_fresh():
                 try:
@@ -476,7 +487,8 @@ class Player(VoiceProtocol):
                 except errors.NotFound:
                     self.controller = None
                     
-                self.controller = await dispatch_message(self.context, content=embed, view=view, delete_after=None, requires_fetch=True)
+                if controller_ctx:
+                    self.controller = await dispatch_message(controller_ctx, content=embed, view=view, delete_after=None, requires_fetch=True)
 
             else:
                 await self.controller.edit(embed=embed, view=view)

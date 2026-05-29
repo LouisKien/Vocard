@@ -251,7 +251,7 @@
             "informationTitle": "📰 Thông tin:",
             "informationBody": "{0} là bot nhạc đơn giản, dễ dùng và thân thiện. Bot hỗ trợ SoundCloud, Spotify, Twitch và nhiều nguồn khác.",
             "getStartedTitle": "Bắt đầu",
-            "getStartedBody": "Vào một kênh thoại rồi dùng /play {Bài hát/URL} để phát nhạc. Bot hỗ trợ tên bài, link video và link playlist trên {0}.",
+            "getStartedBody": "Vào một kênh thoại rồi dùng /play <Bài hát/URL> để phát nhạc. Bot hỗ trợ tên bài, link video và link playlist trên {0}.",
             "categoryTitle": "Danh mục: {0}",
             "commandsTitle": "Lệnh {0}: [{1}]",
             "tutorialBody": "Cách dùng Vocard? Hãy xem video này để nắm các lệnh và thao tác cơ bản.",

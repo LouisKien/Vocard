@@ -209,6 +209,39 @@ def test_controller_tracks_dropdown_is_hard_capped_to_25_options() -> None:
     assert select.options[-1].label.startswith("25.")
 
 
+def test_invoke_controller_uses_channel_context_instead_of_interaction_response(monkeypatch) -> None:
+    captured = {}
+
+    async def fake_dispatch_message(ctx, content=None, **kwargs):
+        captured["ctx"] = ctx
+        captured["content"] = content
+        captured["kwargs"] = kwargs
+        return SimpleNamespace(id=42)
+
+    monkeypatch.setattr("voicelink.player.dispatch_message", fake_dispatch_message)
+    monkeypatch.setattr("voicelink.player.InteractiveController", lambda player: SimpleNamespace())
+
+    fake_channel = SimpleNamespace(send=None, guild=SimpleNamespace(id=123))
+    fake_player = SimpleNamespace(
+        settings={"controller": True},
+        _updating=False,
+        channel=SimpleNamespace(),
+        build_embed=lambda current: "embed",
+        current=SimpleNamespace(),
+        controller=None,
+        bot=SimpleNamespace(get_channel=lambda _id: None),
+        context=SimpleNamespace(channel=fake_channel),
+        dj=SimpleNamespace(),
+        guild=SimpleNamespace(name="Guild", id=123),
+        _logger=logging.getLogger("test"),
+    )
+
+    asyncio.run(voicelink.Player.invoke_controller(fake_player))
+
+    assert isinstance(captured["ctx"], TempCtx)
+    assert captured["ctx"].channel is fake_channel
+
+
 def test_single_guild_sync_purges_legacy_global_commands() -> None:
     class _FakeCommandTree:
         def __init__(self) -> None:

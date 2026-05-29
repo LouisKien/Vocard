@@ -14,6 +14,7 @@ from voicelink.config import (
 )
 from function import should_translate_app_command_context
 from voicelink.language import LangHandler
+from voicelink.mongodb import MongoDBHandler
 from voicelink.placeholders import PlayerPlaceholder
 from voicelink.views.help import HelpView
 
@@ -36,6 +37,27 @@ def test_help_view_uses_fork_github_link() -> None:
 
     assert len(github_buttons) == 1
     assert github_buttons[0].url == "https://github.com/LouisKien/Vocard"
+
+
+def test_help_news_embed_formats_get_started_body_without_named_placeholder_errors(monkeypatch) -> None:
+    Config(
+        {
+            "bot_name": "CátFanSiTạ",
+            "embed_color": "0xb3b3b3",
+            "default_language": "VN",
+            "default_controller": {},
+            "default_voice_status_template": "",
+        }
+    )
+    LangHandler.init()
+    monkeypatch.setattr(MongoDBHandler, "get_cached_settings", classmethod(lambda cls, guild_id: {"lang": "VN"}))
+
+    fake_bot = SimpleNamespace(cogs={})
+    fake_author = SimpleNamespace(display_name="Kien", guild=SimpleNamespace(id=123))
+    embed = HelpView(fake_bot, fake_author).build_embed("news")
+
+    assert "/play" in embed.fields[2].value
+    assert "Bài hát/URL" in embed.fields[2].value
 
 
 def test_vietnamese_runtime_language_pack_includes_new_discord_ui_keys() -> None:
