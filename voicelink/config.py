@@ -21,6 +21,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
 
+import copy
 import os
 
 from pathlib import Path
@@ -35,8 +36,84 @@ from typing import (
 
 from .enums import SearchType
 
+LEGACY_DEFAULT_CONTROLLER_EMBEDS: Dict[str, Dict[str, Any]] = {
+    "active": {
+        "description": "**Now Playing: ```[@@track_name@@]```\nLink: [Click Me](@@track_url@@) | Requester: @@track_requester_mention@@ | DJ: @@dj@@**",
+        "footer": {
+            "text": "Queue Length: @@queue_length@@ | Duration: @@track_duration@@ | Volume: @@volume@@% {{loop_mode != 'Off' ?? | Repeat: @@loop_mode@@}}"
+        },
+        "image": "@@track_thumbnail@@",
+        "author": {
+            "name": "Music Controller | @@channel_name@@",
+            "icon_url": "@@bot_icon@@"
+        },
+        "color": "@@track_color@@"
+    },
+    "inactive": {
+        "title": {
+            "name": "There are no songs playing right now"
+        },
+        "description": "[Support](@@server_invite_link@@) | [Invite](@@invite_link@@) | [Questionnaire](https://forms.gle/Qm8vjBfg2kp13YGD7)",
+        "image": "https://i.imgur.com/dIFBwU7.png",
+        "color": "@@default_embed_color@@"
+    }
+}
+
+LOCALIZED_DEFAULT_CONTROLLER_EMBEDS: Dict[str, Dict[str, Any]] = {
+    "active": {
+        "description": "**@@t_player.controller.nowPlaying@@: ```[@@track_name@@]```\n@@t_player.controller.link@@: [@@t_player.controller.clickMe@@](@@track_url@@) | @@t_player.controller.requester@@: @@track_requester_mention@@ | @@t_player.controller.dj@@: @@dj@@**",
+        "footer": {
+            "text": "@@t_player.controller.queueLength@@: @@queue_length@@ | @@t_player.controller.duration@@: @@track_duration@@ | @@t_player.controller.volume@@: @@volume@@%{{loop_mode != 'Off' ?? | @@t_player.controller.repeat@@: @@loop_mode@@}}"
+        },
+        "image": "@@track_thumbnail@@",
+        "author": {
+            "name": "@@t_player.controller.title@@ | @@channel_name@@",
+            "icon_url": "@@bot_icon@@"
+        },
+        "color": "@@track_color@@"
+    },
+    "inactive": {
+        "title": {
+            "name": "@@t_player.errors.noTrackPlaying@@"
+        },
+        "description": "[@@t_player.controller.support@@](@@server_invite_link@@) | [@@t_player.controller.invite@@](@@invite_link@@) | [@@t_player.controller.questionnaire@@](https://forms.gle/Qm8vjBfg2kp13YGD7)",
+        "image": "https://i.imgur.com/dIFBwU7.png",
+        "color": "@@default_embed_color@@"
+    }
+}
+
+LEGACY_DEFAULT_VOICE_STATUS_TEMPLATE = "{{@@track_name@@ != 'None' ?? @@track_source_emoji@@ Now Playing: @@track_name@@ // Waiting for song requests}}"
+LOCALIZED_DEFAULT_VOICE_STATUS_TEMPLATE = "{{@@track_name@@ != 'None' ?? @@track_source_emoji@@ @@t_player.controller.nowPlaying@@: @@track_name@@ // @@t_player.controller.waitingForRequests@@}}"
+
 if os.getenv("VOCARD_SKIP_DOTENV", "").lower() not in {"1", "true", "yes", "on"}:
     load_dotenv()
+
+
+def normalize_controller_settings(
+    controller: Optional[Dict[str, Any]],
+    default_controller: Dict[str, Any],
+) -> Dict[str, Any]:
+    if not controller:
+        return copy.deepcopy(default_controller or {})
+
+    normalized = copy.deepcopy(controller)
+    if normalized.get("embeds") == LEGACY_DEFAULT_CONTROLLER_EMBEDS:
+        replacement_embeds = default_controller.get("embeds", {})
+        if not replacement_embeds or replacement_embeds == LEGACY_DEFAULT_CONTROLLER_EMBEDS:
+            replacement_embeds = LOCALIZED_DEFAULT_CONTROLLER_EMBEDS
+        normalized["embeds"] = copy.deepcopy(replacement_embeds)
+
+    return normalized
+
+
+def normalize_voice_status_template(template: Optional[str], default_template: str) -> str:
+    if template != LEGACY_DEFAULT_VOICE_STATUS_TEMPLATE:
+        return template
+
+    if default_template and default_template != LEGACY_DEFAULT_VOICE_STATUS_TEMPLATE:
+        return default_template
+
+    return LOCALIZED_DEFAULT_VOICE_STATUS_TEMPLATE
 
 class Config:
     _instance: Optional['Config'] = None
@@ -104,8 +181,14 @@ class Config:
         self.sources_settings: Dict[Dict[str, str]] = settings.get("sources_settings", {})
         self.cooldowns_settings: Dict[str, List[int]] = settings.get("cooldowns", {})
         self.aliases_settings: Dict[str, List[str]] = settings.get("aliases", {})
-        self.controller: Dict[str, Dict[str, Any]] = settings.get("default_controller", {})
-        self.voice_status_template: str = settings.get("default_voice_status_template", "")
+        self.controller: Dict[str, Dict[str, Any]] = normalize_controller_settings(
+            settings.get("default_controller", {}),
+            settings.get("default_controller", {}),
+        )
+        self.voice_status_template: str = normalize_voice_status_template(
+            settings.get("default_voice_status_template", ""),
+            settings.get("default_voice_status_template", ""),
+        )
         self.lyrics_platform: str = settings.get("lyrics_platform", "A_ZLyrics").lower()
         self.ipc_client: Dict[str, Union[str, bool, int]] = settings.get("ipc_client", {})
         self.playlist_settings: Dict[str, Union[str, int]] = settings.get("playlist_settings", {})

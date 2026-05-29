@@ -47,7 +47,7 @@ from discord import (
 from discord.ext import commands
 
 from . import events
-from .config import Config
+from .config import Config, normalize_controller_settings
 from .pool import Node, NodePool
 from .objects import Track, Playlist
 from .filters import Filter, Filters
@@ -316,7 +316,10 @@ class Player(VoiceProtocol):
     
     def build_embed(self, current_track: Track = None):
         """Builds an embed based on the current track state."""
-        controller = self.settings.get("default_controller", Config().controller).get("embeds", {})
+        controller = normalize_controller_settings(
+            self.settings.get("default_controller"),
+            Config().controller,
+        ).get("embeds", {})
         embed_form = controller.get("active" if current_track else "inactive", {})
         
         return PlayerPlaceholder.build_embed(embed_form, self._ph)

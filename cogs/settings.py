@@ -34,6 +34,7 @@ from function import (
 )
 
 from voicelink import MongoDBHandler, LangHandler
+from voicelink.config import normalize_controller_settings
 from voicelink.views import DebugView, HelpView, EmbedBuilderView
 from voicelink.placeholders import PlayerPlaceholder
 from voicelink.utils import format_ms, format_bytes, dispatch_message, send_localized_message
@@ -239,7 +240,10 @@ class Settings(commands.Cog, name="settings"):
     async def customcontroller(self, ctx: commands.Context):
         "Customizes music controller embeds."
         settings = await MongoDBHandler.get_settings(ctx.guild.id)
-        controller_settings = settings.get("default_controller", voicelink.Config().controller)
+        controller_settings = normalize_controller_settings(
+            settings.get("default_controller"),
+            voicelink.Config().controller,
+        )
 
         placeholder = PlayerPlaceholder(ctx.bot)
         view = EmbedBuilderView(ctx, placeholder, controller_settings.get("embeds").copy())
@@ -303,7 +307,10 @@ class Settings(commands.Cog, name="settings"):
             return await send_localized_message(ctx, "permissions.noCreatePermission")
         
         settings = await MongoDBHandler.get_settings(ctx.guild.id)
-        controller = settings.get("default_controller", voicelink.Config().controller).get("embeds", {}).get("inactive", {})        
+        controller = normalize_controller_settings(
+            settings.get("default_controller"),
+            voicelink.Config().controller,
+        ).get("embeds", {}).get("inactive", {})
         message = await channel.send(embed=PlayerPlaceholder.build_embed(controller, PlayerPlaceholder(self.bot)))
 
         await MongoDBHandler.update_settings(ctx.guild.id, {"$set": {'music_request_channel': {

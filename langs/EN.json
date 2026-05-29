@@ -25,6 +25,22 @@
             "trackSelect": "Select a song to skip to ...",
             "filterSelect": "Select a filter to apply ..."
         },
+        "controller": {
+            "title": "Music Controller",
+            "nowPlaying": "Now Playing",
+            "link": "Link",
+            "clickMe": "Click Me",
+            "requester": "Requester",
+            "dj": "DJ",
+            "queueLength": "Queue Length",
+            "duration": "Duration",
+            "volume": "Volume",
+            "repeat": "Repeat",
+            "support": "Support",
+            "invite": "Invite",
+            "questionnaire": "Questionnaire",
+            "waitingForRequests": "Waiting for song requests"
+        },
         "buttons": {
             "back": "Back",
             "pause": "Pause",

@@ -111,22 +111,22 @@
     "default_controller": {
         "embeds": {
             "active": {
-                "description": "**Now Playing: ```[@@track_name@@]```\nLink: [Click Me](@@track_url@@) | Requester: @@track_requester_mention@@ | DJ: @@dj@@**",
+                "description": "**@@t_player.controller.nowPlaying@@: ```[@@track_name@@]```\n@@t_player.controller.link@@: [@@t_player.controller.clickMe@@](@@track_url@@) | @@t_player.controller.requester@@: @@track_requester_mention@@ | @@t_player.controller.dj@@: @@dj@@**",
                 "footer": {
-                    "text": "Queue Length: @@queue_length@@ | Duration: @@track_duration@@ | Volume: @@volume@@% {{loop_mode != 'Off' ?? | Repeat: @@loop_mode@@}}"
+                    "text": "@@t_player.controller.queueLength@@: @@queue_length@@ | @@t_player.controller.duration@@: @@track_duration@@ | @@t_player.controller.volume@@: @@volume@@%{{loop_mode != 'Off' ?? | @@t_player.controller.repeat@@: @@loop_mode@@}}"
                 },
                 "image": "@@track_thumbnail@@",
                 "author": {
-                    "name": "Music Controller | @@channel_name@@",
+                    "name": "@@t_player.controller.title@@ | @@channel_name@@",
                     "icon_url": "@@bot_icon@@"
                 },
                 "color": "@@track_color@@"
             },
             "inactive": {
                 "title": {
-                    "name": "There are no songs playing right now"
+                    "name": "@@t_player.errors.noTrackPlaying@@"
                 },
-                "description": "[Support](@@server_invite_link@@) | [Invite](@@invite_link@@) | [Questionnaire](https://forms.gle/Qm8vjBfg2kp13YGD7)",
+                "description": "[@@t_player.controller.support@@](@@server_invite_link@@) | [@@t_player.controller.invite@@](@@invite_link@@) | [@@t_player.controller.questionnaire@@](https://forms.gle/Qm8vjBfg2kp13YGD7)",
                 "image": "https://i.imgur.com/dIFBwU7.png",
                 "color": "@@default_embed_color@@"
             }
@@ -171,7 +171,7 @@
             }
         ]
     },
-    "default_voice_status_template": "{{@@track_name@@ != 'None' ?? @@track_source_emoji@@ Now Playing: @@track_name@@ // Waiting for song requests}}",
+    "default_voice_status_template": "{{@@track_name@@ != 'None' ?? @@track_source_emoji@@ @@t_player.controller.nowPlaying@@: @@track_name@@ // @@t_player.controller.waitingForRequests@@}}",
     "cooldowns": {
         "connect": [2, 30],
         "playlist view": [1, 30]

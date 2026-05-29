@@ -25,6 +25,22 @@
             "trackSelect": "Chọn một bài hát để bỏ qua đến ...",
             "filterSelect": "Chọn một bộ lọc để áp dụng ..."
         },
+        "controller": {
+            "title": "Bảng điều khiển nhạc",
+            "nowPlaying": "Đang phát",
+            "link": "Liên kết",
+            "clickMe": "Mở bài hát",
+            "requester": "Người yêu cầu",
+            "dj": "DJ",
+            "queueLength": "Độ dài hàng đợi",
+            "duration": "Thời lượng",
+            "volume": "Âm lượng",
+            "repeat": "Lặp lại",
+            "support": "Hỗ trợ",
+            "invite": "Mời bot",
+            "questionnaire": "Biểu mẫu góp ý",
+            "waitingForRequests": "Đang chờ yêu cầu bài hát"
+        },
         "buttons": {
             "back": "Quay Lại",
             "pause": "Tạm Dừng",
