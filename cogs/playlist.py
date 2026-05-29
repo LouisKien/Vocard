@@ -328,11 +328,13 @@ class Playlists(commands.Cog, name="playlist"):
 
         if value and 0 < value <= (len(tracks['tracks'])):
             tracks['tracks'] = [tracks['tracks'][value - 1]]
+        was_playing = player.is_playing
         await player.add_track(tracks['tracks'])
         await send_localized_message(ctx, 'playlist.actions.play', result['playlist']['name'], len(tracks['tracks'][:max_t]))
 
-        if not player.is_playing:
+        if not was_playing:
             await player.do_next()
+        await player.refresh_controller_after_queue_update()
 
     @playlist.command(name="view", aliases=get_aliases("view"))
     @commands.dynamic_cooldown(cooldown_check, commands.BucketType.guild)

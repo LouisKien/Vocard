@@ -76,6 +76,9 @@ class _FakePlayer:
     def get_msg(self, *_keys):
         return ("LIVE", "TRACK_LOAD_POS", "TRACK_LOAD")
 
+    async def refresh_controller_after_queue_update(self):
+        self.order.append("refresh_controller")
+
 
 def _make_playlist() -> voicelink.Playlist:
     return voicelink.Playlist(
@@ -114,6 +117,62 @@ def test_play_starts_playlist_playback_before_sending_confirmation(monkeypatch) 
     asyncio.run(Basic.play.callback(cog, ctx, query="spotify-playlist", start="0", end="0"))
 
     assert player.order.index("do_next") < player.order.index("message")
+
+
+def test_play_refreshes_controller_after_track_confirmation(monkeypatch) -> None:
+    track = SimpleNamespace(
+        title="Song",
+        uri="https://example.com/song",
+        author="Artist",
+        formatted_length="03:00",
+        is_stream=False,
+    )
+    player = _FakePlayer(tracks=[track], is_playing=True)
+    ctx = SimpleNamespace(
+        guild=SimpleNamespace(voice_client=player, id=123),
+        author=SimpleNamespace(mention="@user"),
+        interaction=None,
+    )
+    cog = Basic(_FakeBot())
+
+    async def fake_dispatch_message(*_args, **_kwargs):
+        player.order.append("message")
+        return None
+
+    monkeypatch.setattr("cogs.basic.dispatch_message", fake_dispatch_message)
+
+    asyncio.run(Basic.play.callback(cog, ctx, query="https://example.com/song", start="0", end="0"))
+
+    assert player.order.index("message") < player.order.index("refresh_controller")
+
+
+def test_play_refreshes_controller_after_playlist_confirmation(monkeypatch) -> None:
+    player = _FakePlayer(tracks=_make_playlist(), is_playing=True)
+    ctx = SimpleNamespace(
+        guild=SimpleNamespace(voice_client=player, id=123),
+        author=SimpleNamespace(mention="@user"),
+        interaction=None,
+    )
+    cog = Basic(_FakeBot())
+
+    async def fake_send_localized_message(*_args, **_kwargs):
+        if _args[1] == "player.playback.playlistLoad":
+            player.order.append("message")
+        return None
+
+    monkeypatch.setattr("cogs.basic.send_localized_message", fake_send_localized_message)
+
+    asyncio.run(
+        Basic.play.callback(
+            cog,
+            ctx,
+            query="https://open.spotify.com/playlist/37i9dQZF1DWVOaOWiVD1Lf?si=test",
+            start="0",
+            end="0",
+        )
+    )
+
+    assert player.order.index("message") < player.order.index("refresh_controller")
 
 
 def test_play_sends_spotify_playlist_loading_notice_before_lookup_and_cleans_it_up(monkeypatch) -> None:
@@ -325,6 +384,94 @@ def test_invoke_controller_uses_channel_context_instead_of_interaction_response(
 
     assert isinstance(captured["ctx"], TempCtx)
     assert captured["ctx"].channel is fake_channel
+
+
+def test_invoke_controller_reposts_new_message_for_forced_queue_update(monkeypatch) -> None:
+    deleted: list[str] = []
+    dispatched: list[int] = []
+
+    async def fake_dispatch_message(ctx, content=None, **kwargs):
+        dispatched.append(ctx.channel.id)
+        return SimpleNamespace(id=99)
+
+    async def fail_is_position_fresh():
+        raise AssertionError("Forced controller refresh should not depend on position freshness")
+
+    old_controller = SimpleNamespace(id=42, delete=lambda: deleted.append("old"))
+
+    monkeypatch.setattr("voicelink.player.dispatch_message", fake_dispatch_message)
+    monkeypatch.setattr("voicelink.player.InteractiveController", lambda player: SimpleNamespace())
+
+    async def delete_old():
+        deleted.append("old")
+
+    old_controller.delete = delete_old
+
+    fake_channel = SimpleNamespace(id=456, send=None, guild=SimpleNamespace(id=123))
+    fake_player = SimpleNamespace(
+        settings={"controller": True},
+        _updating=False,
+        channel=SimpleNamespace(),
+        build_embed=lambda current: "embed",
+        current=SimpleNamespace(),
+        controller=old_controller,
+        bot=SimpleNamespace(get_channel=lambda _id: None),
+        context=SimpleNamespace(channel=fake_channel),
+        dj=SimpleNamespace(),
+        guild=SimpleNamespace(name="Guild", id=123),
+        _logger=logging.getLogger("test"),
+        is_position_fresh=fail_is_position_fresh,
+    )
+    fake_player._replace_controller_message = voicelink.Player._replace_controller_message.__get__(fake_player, type(fake_player))
+
+    asyncio.run(voicelink.Player.invoke_controller(fake_player, prefer_new_message=True))
+
+    assert deleted == ["old"]
+    assert dispatched == [456]
+    assert fake_player.controller.id == 99
+
+
+def test_invoke_controller_keeps_sticky_request_channel_message_when_forced(monkeypatch) -> None:
+    edited: list[str] = []
+
+    async def fake_edit(*, embed=None, view=None):
+        edited.append("edited")
+
+    fetched_message = SimpleNamespace(id=55, edit=fake_edit)
+
+    async def fake_fetch_message(message_id):
+        assert message_id == 55
+        return fetched_message
+
+    def get_channel(channel_id):
+        assert channel_id == 777
+        return SimpleNamespace(fetch_message=fake_fetch_message, guild=SimpleNamespace(id=123))
+
+    async def fail_dispatch_message(*_args, **_kwargs):
+        raise AssertionError("Sticky request-channel controller should be edited instead of re-posted")
+
+    monkeypatch.setattr("voicelink.player.dispatch_message", fail_dispatch_message)
+    monkeypatch.setattr("voicelink.player.InteractiveController", lambda player: SimpleNamespace())
+
+    fake_player = SimpleNamespace(
+        settings={"controller": True, "music_request_channel": {"text_channel_id": 777, "controller_msg_id": 55}},
+        _updating=False,
+        channel=SimpleNamespace(),
+        build_embed=lambda current: "embed",
+        current=SimpleNamespace(),
+        controller=None,
+        bot=SimpleNamespace(get_channel=get_channel),
+        context=SimpleNamespace(channel=SimpleNamespace(id=456)),
+        dj=SimpleNamespace(),
+        guild=SimpleNamespace(name="Guild", id=123),
+        _logger=logging.getLogger("test"),
+    )
+    fake_player._replace_controller_message = voicelink.Player._replace_controller_message.__get__(fake_player, type(fake_player))
+
+    asyncio.run(voicelink.Player.invoke_controller(fake_player, prefer_new_message=True))
+
+    assert edited == ["edited"]
+    assert fake_player.controller is fetched_message
 
 
 def test_voice_status_cleanup_clears_status_even_when_cached_channel_status_is_missing() -> None:

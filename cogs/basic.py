@@ -118,6 +118,10 @@ class Basic(commands.Cog):
         finally:
             await self._dismiss_temporary_message(loading_message)
 
+    @staticmethod
+    async def _refresh_controller_after_queue_add(player: voicelink.Player) -> None:
+        await player.refresh_controller_after_queue_update()
+
     async def help_autocomplete(self, interaction: discord.Interaction, current: str) -> list:
         return [app_commands.Choice(name=c.capitalize(), value=c) for c in self.bot.cogs if c not in ["Nodes", "Task"] and current in c]
 
@@ -195,6 +199,7 @@ class Basic(commands.Cog):
             if not was_playing:
                 await player.do_next()
             await send_localized_message(ctx, "player.playback.playlistLoad", tracks.name, index, settings=settings)
+            await self._refresh_controller_after_queue_add(player)
         else:
             position = await player.add_track(tracks[0], start_time=format_to_ms(start), end_time=format_to_ms(end))
             if not was_playing:
@@ -210,6 +215,7 @@ class Basic(commands.Cog):
                 position if position >= 1 and was_playing else None,
                 settings=settings,
             )
+            await self._refresh_controller_after_queue_add(player)
     
     @commands.dynamic_cooldown(cooldown_check, commands.BucketType.guild)
     async def _play(self, interaction: discord.Interaction, message: discord.Message):
@@ -251,6 +257,7 @@ class Basic(commands.Cog):
             if not was_playing:
                 await player.do_next()
             await send_localized_message(interaction, "player.playback.playlistLoad", tracks.name, index, settings=settings)
+            await self._refresh_controller_after_queue_add(player)
         else:
             position = await player.add_track(tracks[0])
             if not was_playing:
@@ -267,6 +274,7 @@ class Basic(commands.Cog):
                 position if position >= 1 and was_playing else None,
                 settings=settings,
             )
+            await self._refresh_controller_after_queue_add(player)
 
     @commands.hybrid_command(name="search", aliases=get_aliases("search"))
     @app_commands.describe(
@@ -326,6 +334,7 @@ class Basic(commands.Cog):
             if not was_playing:
                 await player.do_next()
             await dispatch_message(ctx, msg, settings=settings)
+            await self._refresh_controller_after_queue_add(player)
 
     @commands.hybrid_command(name="playtop", aliases=get_aliases("playtop"))
     @app_commands.describe(
@@ -358,6 +367,7 @@ class Basic(commands.Cog):
             if not was_playing:
                 await player.do_next()
             await send_localized_message(ctx, "player.playback.playlistLoad", tracks.name, index, settings=settings)
+            await self._refresh_controller_after_queue_add(player)
         else:
             position = await player.add_track(tracks[0], start_time=format_to_ms(start), end_time=format_to_ms(end), at_front=True)
             if not was_playing:
@@ -374,6 +384,7 @@ class Basic(commands.Cog):
                 position if position >= 1 and was_playing else None,
                 settings=settings,
             )
+            await self._refresh_controller_after_queue_add(player)
 
     @commands.hybrid_command(name="forceplay", aliases=get_aliases("forceplay"))
     @app_commands.describe(
@@ -411,6 +422,7 @@ class Basic(commands.Cog):
 
         if isinstance(tracks, voicelink.Playlist):
             await send_localized_message(ctx, "player.playback.playlistLoad", tracks.name, index, settings=settings)
+            await self._refresh_controller_after_queue_add(player)
         else:
             texts = player.get_msg("common.status.live", "player.playback.trackLoad")
             stream_content = f"`{texts[0]}`" if tracks[0].is_stream else ""
@@ -421,6 +433,7 @@ class Basic(commands.Cog):
                 tracks[0].title, tracks[0].uri, tracks[0].author, tracks[0].formatted_length,
                 settings=settings,
             )
+            await self._refresh_controller_after_queue_add(player)
 
     @commands.hybrid_command(name="pause", aliases=get_aliases("pause"))
     @commands.dynamic_cooldown(cooldown_check, commands.BucketType.guild)
@@ -640,6 +653,7 @@ class Basic(commands.Cog):
             if not was_playing:
                 await player.do_next()
             await send_localized_message(ctx, "player.playback.playlistLoad", attachment.filename, index, settings=settings)
+            await self._refresh_controller_after_queue_add(player)
         except Exception as e:
             logger.error("error", exc_info=e)
             raise e

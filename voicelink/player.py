@@ -454,7 +454,31 @@ class Player(VoiceProtocol):
 
         self._schedule_post_playback_updates(track)
 
-    async def invoke_controller(self):
+    async def _replace_controller_message(
+        self,
+        controller_ctx: TempCtx | None,
+        *,
+        embed: Any,
+        view: Any,
+    ) -> None:
+        if self.controller:
+            try:
+                await self.controller.delete()
+            except (errors.NotFound, errors.HTTPException):
+                self.controller = None
+            else:
+                self.controller = None
+
+        if controller_ctx:
+            self.controller = await dispatch_message(
+                controller_ctx,
+                content=embed,
+                view=view,
+                delete_after=None,
+                requires_fetch=True,
+            )
+
+    async def invoke_controller(self, *, prefer_new_message: bool = False):
         """Sends or updates the music controller message in the designated channel."""
         if not self.settings.get('controller', True) or self._updating or not self.channel or getattr(self, "_tearing_down", False):
             return
@@ -465,6 +489,7 @@ class Player(VoiceProtocol):
             request_channel_data = self.settings.get("music_request_channel") or {}
             request_channel = None
             target_channel = None
+            sticky_request_controller = bool(request_channel_data.get("controller_msg_id"))
             if request_channel_data:
                 request_channel = self.bot.get_channel(request_channel_data.get("text_channel_id"))
                 target_channel = request_channel
@@ -486,14 +511,19 @@ class Player(VoiceProtocol):
                     if controller_ctx:
                         self.controller = await dispatch_message(controller_ctx, content=embed, view=view, delete_after=None, requires_fetch=True)
 
+            elif prefer_new_message and not sticky_request_controller:
+                await self._replace_controller_message(
+                    controller_ctx,
+                    embed=embed,
+                    view=view,
+                )
+
             elif not await self.is_position_fresh():
-                try:
-                    await self.controller.delete()
-                except errors.NotFound:
-                    self.controller = None
-                    
-                if controller_ctx:
-                    self.controller = await dispatch_message(controller_ctx, content=embed, view=view, delete_after=None, requires_fetch=True)
+                await self._replace_controller_message(
+                    controller_ctx,
+                    embed=embed,
+                    view=view,
+                )
 
             else:
                 await self.controller.edit(embed=embed, view=view)
@@ -509,14 +539,22 @@ class Player(VoiceProtocol):
 
     async def is_position_fresh(self):
         """Checks if the current controller message is among the most recent messages."""
+        history_channel = getattr(self.controller, "channel", None) or getattr(self.context, "channel", None)
+        if not history_channel:
+            return False
+
         try:
-            async for message in self.context.channel.history(limit=5):
+            async for message in history_channel.history(limit=5):
                 if message.id == self.controller.id:
                     return True
         except (AttributeError, errors.HTTPException):
             pass
 
         return False
+
+    async def refresh_controller_after_queue_update(self) -> None:
+        """Keeps the controller visible after queue additions without duplicating sticky request-channel controllers."""
+        await self.invoke_controller(prefer_new_message=True)
     
     async def teardown(self):
         """Cleans up the player and associated resources."""
