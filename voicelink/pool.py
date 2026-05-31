@@ -59,9 +59,17 @@ if TYPE_CHECKING:
 URL_REGEX = re.compile(
     r"https?://(?:www\.)?.+"
 )
+SPOTIFY_PLAYLIST_URL_REGEX = re.compile(
+    r"^https?://open\.spotify\.com/playlist/[A-Za-z0-9]+(?:\?.*)?$",
+    re.IGNORECASE,
+)
 
 NODE_VERSION = "v4"
 DEFAULT_NODE_TIMEOUT = aiohttp.ClientTimeout(total=30, connect=10, sock_connect=10, sock_read=30)
+DEFAULT_SPOTIFY_PLAYLIST_LOOKUP_TIMEOUT_SECONDS = max(
+    int(os.getenv("LAVALINK_SPOTIFY_PLAYLIST_TIMEOUT_SECONDS", "90")),
+    int(DEFAULT_NODE_TIMEOUT.total or 30),
+)
 DEFAULT_NODE_CONNECTOR_LIMIT = 20
 
 class Node:
@@ -253,7 +261,27 @@ class Node:
         elif op == "playerUpdate":
             await player._update_state(data)
 
-    async def send(self, method: RequestMethod, query: str, data: Union[dict, str] = {}) -> dict:
+    @staticmethod
+    def _is_spotify_playlist_query(query: str) -> bool:
+        return bool(SPOTIFY_PLAYLIST_URL_REGEX.match(query.strip()))
+
+    @staticmethod
+    def _build_playlist_lookup_timeout() -> aiohttp.ClientTimeout:
+        return aiohttp.ClientTimeout(
+            total=DEFAULT_SPOTIFY_PLAYLIST_LOOKUP_TIMEOUT_SECONDS,
+            connect=DEFAULT_NODE_TIMEOUT.connect,
+            sock_connect=DEFAULT_NODE_TIMEOUT.sock_connect,
+            sock_read=DEFAULT_SPOTIFY_PLAYLIST_LOOKUP_TIMEOUT_SECONDS,
+        )
+
+    async def send(
+        self,
+        method: RequestMethod,
+        query: str,
+        data: Union[dict, str] = {},
+        *,
+        timeout: aiohttp.ClientTimeout | None = None,
+    ) -> dict:
         if not self._available:
             raise NodeNotAvailable(f"The node '{self._identifier}' is unavailable.")
         
@@ -262,7 +290,8 @@ class Node:
             method=method.value,
             url=uri,
             headers={"Authorization": self._password},
-            json=data
+            json=data,
+            timeout=timeout,
         ) as resp:
             if resp.status >= 300:
                 body = await resp.text()
@@ -437,22 +466,60 @@ class Node:
         if not URL_REGEX.match(query) and ':' not in query:
             query = f"{search_type}:{query}"
 
-        try:
-            response: dict[str, Any] = await self.send(
-                RequestMethod.GET,
-                f"loadtracks?identifier={quote(query)}",
-            )
-        except Exception as error:
-            self._log_track_lookup_failure(
-                query=query,
-                requester=requester,
-                search_type=search_type,
-                error=error,
-            )
-            raise
+        is_spotify_playlist = self._is_spotify_playlist_query(query)
+        lookup_timeout = self._build_playlist_lookup_timeout() if is_spotify_playlist else None
+        max_attempts = 2 if is_spotify_playlist else 1
 
-        data = response.get("data")
-        load_type = response.get("loadType")
+        response: dict[str, Any] | None = None
+        load_type: str | None = None
+        data: Any = None
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = await self.send(
+                    RequestMethod.GET,
+                    f"loadtracks?identifier={quote(query)}",
+                    timeout=lookup_timeout,
+                )
+            except Exception as error:
+                if attempt < max_attempts:
+                    if self._logger:
+                        self._logger.warning(
+                            "Retrying Spotify playlist lookup on node [%s] after attempt %s/%s failed for query=%r.",
+                            self._identifier,
+                            attempt,
+                            max_attempts,
+                            query,
+                            exc_info=error,
+                        )
+                    continue
+
+                self._log_track_lookup_failure(
+                    query=query,
+                    requester=requester,
+                    search_type=search_type,
+                    error=error,
+                )
+                raise
+
+            data = response.get("data")
+            load_type = response.get("loadType")
+
+            if load_type == "error" and attempt < max_attempts:
+                if self._logger:
+                    self._logger.warning(
+                        "Retrying Spotify playlist lookup on node [%s] after attempt %s/%s returned loadType=error for query=%r.",
+                        self._identifier,
+                        attempt,
+                        max_attempts,
+                        query,
+                    )
+                response = None
+                load_type = None
+                data = None
+                continue
+
+            break
 
         if not load_type:
             self._log_track_lookup_failure(

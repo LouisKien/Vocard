@@ -43,6 +43,7 @@ Fill these in `.env` before production use:
 - `MONGO_WIREDTIGER_CACHE_SIZE_GB`: defaults to `0.25` to keep Mongo memory usage sane on low-end homelab machines.
 - `LAVALINK_HOST`, `LAVALINK_PORT`, `LAVALINK_PASSWORD`.
 - `LAVALINK_JAVA_OPTS`: defaults to `-Xms128m -Xmx512m -XX:+UseG1GC -XX:MaxGCPauseMillis=200` to avoid oversized JVM defaults on small hosts.
+- `LAVALINK_SPOTIFY_PLAYLIST_TIMEOUT_SECONDS`: defaults to `90` so slow Spotify playlist lookups do not get cut off by the bot-side REST client after only 30 seconds.
 - `LAVASRC_SPOTIFY_CLIENT_ID`, `LAVASRC_SPOTIFY_CLIENT_SECRET`.
 
 `CLIENT_ID` is optional; the bot derives it from Discord after login. `DEFAULT_LANGUAGE=VN` is the homelab default; message strings use `langs/VN.json`, and Discord slash-command localization uses `local_langs/vi.json`.
@@ -55,7 +56,7 @@ Spotify is handled by LavaSrc, not by a separate ad-hoc container. The Compose-m
 LAVASRC_SPOTIFY_CUSTOM_TOKEN_ENDPOINT=http://spotify-tokener:8080/api/token
 ```
 
-For generated/editorial playlists, set `LAVASRC_SPOTIFY_SP_DC` from your logged-in `open.spotify.com` browser cookie. The bot also switches LavaSrc Spotify API mode at runtime so direct Spotify tracks and Spotify playlists both load correctly.
+For generated/editorial playlists, set `LAVASRC_SPOTIFY_SP_DC` from your logged-in `open.spotify.com` browser cookie. Slow Spotify playlist lookups are expected; this fork keeps a longer bot-side timeout for Spotify playlist `loadtracks` requests instead of failing after the default 30-second REST read window.
 
 ## Single-Guild Behavior
 

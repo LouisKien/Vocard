@@ -21,7 +21,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
 
+import asyncio
 import re
+import aiohttp
 import discord
 import voicelink
 
@@ -115,6 +117,23 @@ class Basic(commands.Cog):
 
         try:
             return await player.get_tracks(query, requester=requester, search_type=search_type)
+        except voicelink.TrackLoadError as error:
+            if self._is_spotify_playlist_query(query):
+                message = player.get_msg("player.errors.spotifyPlaylistLookupFailed")
+                if message == "Not found!":
+                    message = "Spotify playlist này đang tải quá lâu hoặc tạm thời lỗi. Vui lòng thử lại sau."
+                raise voicelink.TrackLoadError(message) from error
+            raise
+        except (asyncio.TimeoutError, aiohttp.ClientError, voicelink.NodeException) as error:
+            if self._is_spotify_playlist_query(query):
+                message = player.get_msg("player.errors.spotifyPlaylistLookupFailed")
+                if message == "Not found!":
+                    message = "Spotify playlist này đang tải quá lâu hoặc tạm thời lỗi. Vui lòng thử lại sau."
+            else:
+                message = player.get_msg("player.errors.trackLookupFailed")
+                if message == "Not found!":
+                    message = "Không thể tải dữ liệu bài hát lúc này. Vui lòng thử lại sau."
+            raise voicelink.TrackLoadError(message) from error
         finally:
             await self._dismiss_temporary_message(loading_message)
 
@@ -144,7 +163,10 @@ class Basic(commands.Cog):
             if not node:
                 return []
             
-            tracks: list[voicelink.Track] = await node.get_tracks(current, requester=interaction.user)
+            try:
+                tracks: list[voicelink.Track] = await node.get_tracks(current, requester=interaction.user)
+            except Exception:
+                return []
             if not tracks:
                 return []
             
@@ -316,7 +338,14 @@ class Basic(commands.Cog):
             return await send_localized_message(ctx, "search.noLinkSupport", ephemeral=True, settings=settings)
         
         search_type: voicelink.SearchType = voicelink.SearchType.from_platform(platform) or Config().search_platform
-        tracks = await player.get_tracks(query=query, requester=ctx.author, search_type=search_type)
+        tracks = await self._get_tracks_with_loading_notice(
+            ctx,
+            player,
+            query=query,
+            requester=ctx.author,
+            settings=settings,
+            search_type=search_type,
+        )
         if not tracks:
             return await send_localized_message(ctx, "player.errors.noTrackFound", settings=settings)
 
@@ -371,7 +400,13 @@ class Basic(commands.Cog):
         settings = player.settings
         player.bind_controller_context(ctx)
 
-        tracks = await player.get_tracks(query, requester=ctx.author)
+        tracks = await self._get_tracks_with_loading_notice(
+            ctx,
+            player,
+            query=query,
+            requester=ctx.author,
+            settings=settings,
+        )
         if not tracks:
             return await send_localized_message(ctx, "player.errors.noTrackFound", settings=settings)
 
@@ -421,7 +456,13 @@ class Basic(commands.Cog):
         settings = player.settings
         player.bind_controller_context(ctx)
 
-        tracks = await player.get_tracks(query, requester=ctx.author)
+        tracks = await self._get_tracks_with_loading_notice(
+            ctx,
+            player,
+            query=query,
+            requester=ctx.author,
+            settings=settings,
+        )
         if not tracks:
             return await send_localized_message(ctx, "player.errors.noTrackFound", settings=settings)
 

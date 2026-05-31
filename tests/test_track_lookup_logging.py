@@ -19,7 +19,7 @@ def test_node_get_tracks_logs_lavalink_fault_details(caplog) -> None:
     async def noop_partner_api(_: bool) -> None:
         return None
 
-    async def fake_send(method, path: str):
+    async def fake_send(method, path: str, *, timeout=None, data=None):
         assert "loadtracks?identifier=" in path
         return {
             "loadType": "error",
@@ -53,7 +53,7 @@ def test_spotify_urls_do_not_mutate_global_lavasrc_config_per_request() -> None:
     async def should_not_be_called(_: bool) -> None:
         raise AssertionError("Node.get_tracks() must not patch global LavaSrc Spotify config per request")
 
-    async def fake_send(method, path: str):
+    async def fake_send(method, path: str, *, timeout=None, data=None):
         assert "loadtracks?identifier=" in path
         return {"loadType": "empty"}
 
@@ -77,3 +77,34 @@ def test_spotify_urls_do_not_mutate_global_lavasrc_config_per_request() -> None:
             search_type=SearchType.YOUTUBE,
         )
     ) is None
+
+
+def test_spotify_playlist_lookup_uses_extended_timeout_and_retries_once_on_timeout() -> None:
+    node = object.__new__(Node)
+    node._identifier = "DEFAULT"
+    node._logger = logging.getLogger("tests.track_lookup")
+
+    calls: list[float | None] = []
+
+    async def fake_send(method, path: str, *, timeout=None, data=None):
+        assert "loadtracks?identifier=" in path
+        calls.append(getattr(timeout, "total", None))
+        if len(calls) == 1:
+            raise asyncio.TimeoutError()
+        return {"loadType": "empty"}
+
+    node.send = fake_send
+
+    requester = SimpleNamespace(id=123456789)
+
+    assert asyncio.run(
+        node.get_tracks(
+            "https://open.spotify.com/playlist/6XFOsAdp88ptBCdqUMAfmP?si=test",
+            requester=requester,
+            search_type=SearchType.YOUTUBE,
+        )
+    ) is None
+
+    assert len(calls) == 2
+    assert calls[0] == 90
+    assert calls[1] == 90

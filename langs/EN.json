@@ -19,6 +19,8 @@
             "noPlayer": "No player has been found on this server.",
             "noTrackPlaying": "There are no songs playing right now",
             "noTrackFound": "No songs were found with that query! Please provide a valid url.",
+            "trackLookupFailed": "I couldn't load track data right now. Please try again in a moment.",
+            "spotifyPlaylistLookupFailed": "I couldn't load that Spotify playlist right now. Spotify may be responding slowly or the upstream source may be temporarily failing. Please try again shortly.",
             "trackPlaybackFailed": "I could not play this track. The next song will begin in 5 seconds."
         },
         "dropdown": {

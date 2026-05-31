@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 from types import SimpleNamespace
 
+import aiohttp
 import discord
 import pytest
 import voicelink
@@ -14,6 +15,7 @@ from cogs.basic import Basic
 from cogs.playlist import Playlists
 from cogs.settings import Settings
 from function import sync_single_guild_app_commands
+from voicelink.exceptions import TrackLoadError
 from voicelink.views.controller import (
     AutoPlay,
     Forward,
@@ -130,7 +132,13 @@ class _FakePlayer:
         self.order.append(f"repeat:{mode.name}")
 
     def get_msg(self, *_keys):
-        return ("LIVE", "TRACK_LOAD_POS", "TRACK_LOAD")
+        if _keys == ("common.status.live", "player.playback.trackLoadPos", "player.playback.trackLoad"):
+            return ("LIVE", "TRACK_LOAD_POS", "TRACK_LOAD")
+        if _keys == ("player.errors.spotifyPlaylistLookupFailed",):
+            return "Spotify playlist lookup failed"
+        if _keys == ("player.errors.trackLookupFailed",):
+            return "Track lookup failed"
+        return "Not found!"
 
     def bind_controller_context(self, ctx):
         self.context = ctx
@@ -583,6 +591,104 @@ def test_play_does_not_send_spotify_playlist_loading_notice_for_spotify_track(mo
 
     assert "player.playback.spotifyPlaylistLoading" not in sent_keys
     assert "dispatch" in sent_keys
+
+
+def test_spotify_playlist_loading_notice_wraps_track_load_error_in_user_friendly_error(monkeypatch) -> None:
+    player = _FakePlayer(tracks=_make_playlist(), is_playing=False)
+    ctx = SimpleNamespace(
+        guild=SimpleNamespace(voice_client=player, id=123),
+        author=SimpleNamespace(mention="@user"),
+        interaction=None,
+    )
+    cog = Basic(_FakeBot())
+    class _LoadingMessage:
+        async def delete(self):
+            player.order.append("delete_loading")
+
+    async def fake_send_localized_message(*_args, **_kwargs):
+        key = _args[1]
+        if key == "player.playback.spotifyPlaylistLoading":
+            player.order.append("loading")
+            return _LoadingMessage()
+        if key == "player.playback.playlistLoad":
+            player.order.append("playlistLoad")
+        return None
+
+    async def fake_get_tracks(*_args, **_kwargs):
+        player.order.append("get_tracks")
+        raise TrackLoadError("Something went wrong while looking up the track. [fault]")
+
+    monkeypatch.setattr("cogs.basic.send_localized_message", fake_send_localized_message)
+    monkeypatch.setattr(player, "get_tracks", fake_get_tracks)
+
+    with pytest.raises(TrackLoadError, match="Spotify"):
+        asyncio.run(
+            Basic.play.callback(
+                cog,
+                ctx,
+                query="https://open.spotify.com/playlist/37i9dQZF1DWVOaOWiVD1Lf?si=test",
+                start="0",
+                end="0",
+            )
+        )
+
+    assert player.order.index("loading") < player.order.index("get_tracks")
+    assert player.order[-1] == "delete_loading"
+
+
+def test_spotify_playlist_loading_notice_wraps_timeout_in_track_load_error(monkeypatch) -> None:
+    player = _FakePlayer(tracks=_make_playlist(), is_playing=False)
+    ctx = SimpleNamespace(
+        guild=SimpleNamespace(voice_client=player, id=123),
+        author=SimpleNamespace(mention="@user"),
+        interaction=None,
+    )
+    cog = Basic(_FakeBot())
+    class _LoadingMessage:
+        async def delete(self):
+            player.order.append("delete_loading")
+
+    async def fake_send_localized_message(*_args, **_kwargs):
+        key = _args[1]
+        if key == "player.playback.spotifyPlaylistLoading":
+            player.order.append("loading")
+            return _LoadingMessage()
+        return None
+
+    async def fake_get_tracks(*_args, **_kwargs):
+        player.order.append("get_tracks")
+        raise aiohttp.client_exceptions.SocketTimeoutError("Timeout on reading data from socket")
+
+    monkeypatch.setattr("cogs.basic.send_localized_message", fake_send_localized_message)
+    monkeypatch.setattr(player, "get_tracks", fake_get_tracks)
+
+    with pytest.raises(TrackLoadError, match="Spotify"):
+        asyncio.run(
+            Basic.play.callback(
+                cog,
+                ctx,
+                query="https://open.spotify.com/playlist/6XFOsAdp88ptBCdqUMAfmP?si=test",
+                start="0",
+                end="0",
+            )
+        )
+
+    assert player.order.index("loading") < player.order.index("get_tracks")
+    assert player.order[-1] == "delete_loading"
+
+
+def test_play_autocomplete_returns_empty_when_lookup_fails(monkeypatch) -> None:
+    interaction = SimpleNamespace(user=SimpleNamespace(id=1))
+    cog = Basic(_FakeBot())
+    node = SimpleNamespace()
+
+    async def fake_get_tracks(*_args, **_kwargs):
+        raise aiohttp.client_exceptions.SocketTimeoutError("Timeout on reading data from socket")
+
+    node.get_tracks = fake_get_tracks
+    monkeypatch.setattr("cogs.basic.voicelink.NodePool.get_node", lambda: node)
+
+    assert asyncio.run(cog.play_autocomplete(interaction, "spotify playlist")) == []
 
 
 def test_skip_stops_audio_before_sending_confirmation(monkeypatch) -> None:

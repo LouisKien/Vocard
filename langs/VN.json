@@ -19,6 +19,8 @@
             "noPlayer": "Không tìm thấy trình phát nào trên máy chủ này.",
             "noTrackPlaying": "Hiện tại không có bài hát nào đang phát",
             "noTrackFound": "Không tìm thấy bài hát nào với truy vấn đó! Vui lòng cung cấp url hợp lệ.",
+            "trackLookupFailed": "Không thể tải dữ liệu bài hát lúc này. Vui lòng thử lại sau.",
+            "spotifyPlaylistLookupFailed": "Không thể tải playlist Spotify lúc này. Playlist này có thể đang phản hồi chậm hoặc nguồn Spotify tạm thời lỗi. Vui lòng thử lại sau.",
             "trackPlaybackFailed": "Không thể phát bài này. Mình sẽ bỏ qua và phát bài tiếp theo sau 5 giây."
         },
         "dropdown": {
