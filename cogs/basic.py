@@ -46,6 +46,8 @@ SPOTIFY_PLAYLIST_URL_REGEX = re.compile(
     r"^https?://open\.spotify\.com/playlist/[A-Za-z0-9]+(?:\?.*)?$",
     re.IGNORECASE,
 )
+AUTOCOMPLETE_MIN_QUERY_LENGTH = 2
+AUTOCOMPLETE_LOOKUP_TIMEOUT_SECONDS = 2.0
 
 async def nowplay(ctx: commands.Context, player: voicelink.Player):
     track = player.current
@@ -155,16 +157,23 @@ class Basic(commands.Cog):
         return [app_commands.Choice(name=c.capitalize(), value=c) for c in self.bot.cogs if c not in ["Nodes", "Task"] and current in c]
 
     async def play_autocomplete(self, interaction: discord.Interaction, current: str) -> list:
+        current = current.strip()
         if voicelink.pool.URL_REGEX.match(current):
             return []
 
         if current:
+            if len(current) < AUTOCOMPLETE_MIN_QUERY_LENGTH:
+                return []
+
             node = voicelink.NodePool.get_node()
             if not node:
                 return []
             
             try:
-                tracks: list[voicelink.Track] = await node.get_tracks(current, requester=interaction.user)
+                tracks: list[voicelink.Track] = await asyncio.wait_for(
+                    node.get_tracks(current, requester=interaction.user),
+                    timeout=AUTOCOMPLETE_LOOKUP_TIMEOUT_SECONDS,
+                )
             except Exception:
                 return []
             if not tracks:
@@ -966,14 +975,16 @@ class Basic(commands.Cog):
             artist = player.current.author
         
         await ctx.defer()
-        lyrics_platform = voicelink.LYRICS_PLATFORMS.get(Config().lyrics_platform)
-        if lyrics_platform:
-            lyrics = await lyrics_platform().get_lyrics(title, artist)
-            if not lyrics:
-                return await send_localized_message(ctx, "lyrics.notFound", ephemeral=True)
-            
-            view = LyricsView(name=title, source={_: re.findall(r'.*\n(?:.*\n){,22}', v or "") for _, v in lyrics.items()}, author=ctx.author)
-            view.response = await dispatch_message(ctx, await view.build_embed(), view=view)
+        try:
+            lyrics = await voicelink.fetch_lyrics(title, artist)
+        except Exception as error:
+            logger.warning("Lyrics lookup failed for title=%r artist=%r", title, artist, exc_info=error)
+            lyrics = None
+        if not lyrics:
+            return await send_localized_message(ctx, "lyrics.notFound", ephemeral=True)
+
+        view = LyricsView(name=title, source={_: re.findall(r'.*\n(?:.*\n){,22}', v or "") for _, v in lyrics.items()}, author=ctx.author)
+        view.response = await dispatch_message(ctx, await view.build_embed(), view=view)
 
     @commands.hybrid_command(name="swapdj", aliases=get_aliases("swapdj"))
     @app_commands.describe(member="Choose a member to transfer the dj role.")

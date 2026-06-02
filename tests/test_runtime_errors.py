@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from cogs.listeners import sanitize_track_exception_message
+from cogs.basic import Basic
+from cogs.listeners import Listeners, sanitize_track_exception_message
 from voicelink.language import LangHandler
-from voicelink.lyrics import A_ZLyrics
+from voicelink.lyrics import A_ZLyrics, _fetch_json, _fetch_text
 from voicelink.player import Player
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -93,3 +95,164 @@ def test_vietnamese_slash_command_localization_exists() -> None:
     assert vi_localization["Which setting to restore to defaults."] == "Chọn cài đặt cần khôi phục về mặc định."
     reference_localization = json.loads((ROOT / "local_langs" / "es-ES.json").read_text(encoding="utf8"))
     assert set(reference_localization) <= set(vi_localization)
+
+
+def test_fetch_text_returns_none_when_request_times_out(monkeypatch) -> None:
+    class _FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        def get(self, *args, **kwargs):
+            raise asyncio.TimeoutError()
+
+    monkeypatch.setattr("voicelink.lyrics.aiohttp.ClientSession", lambda *args, **kwargs: _FakeSession())
+
+    assert asyncio.run(_fetch_text("https://example.com")) is None
+
+
+def test_fetch_json_returns_none_when_request_times_out(monkeypatch) -> None:
+    class _FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        def get(self, *args, **kwargs):
+            raise asyncio.TimeoutError()
+
+    monkeypatch.setattr("voicelink.lyrics.aiohttp.ClientSession", lambda *args, **kwargs: _FakeSession())
+
+    assert asyncio.run(_fetch_json("https://example.com")) is None
+
+
+def test_lyrics_command_returns_not_found_when_safe_lookup_times_out(monkeypatch) -> None:
+    cog = Basic(SimpleNamespace(tree=SimpleNamespace(add_command=lambda *_args, **_kwargs: None)))
+    ctx = SimpleNamespace(
+        guild=SimpleNamespace(voice_client=None),
+        author=SimpleNamespace(),
+        deferred=False,
+    )
+    messages: list[str] = []
+
+    async def fake_defer():
+        ctx.deferred = True
+
+    async def fake_send_localized_message(_ctx, key, *args, **kwargs):
+        messages.append(key)
+        return None
+
+    async def fake_fetch_lyrics(_title, _artist):
+        raise asyncio.TimeoutError()
+
+    ctx.defer = fake_defer
+    monkeypatch.setattr("cogs.basic.send_localized_message", fake_send_localized_message)
+    monkeypatch.setattr("cogs.basic.voicelink.fetch_lyrics", fake_fetch_lyrics)
+
+    asyncio.run(Basic.lyrics.callback(cog, ctx, title="Song", artist="Artist"))
+
+    assert ctx.deferred is True
+    assert messages == ["lyrics.notFound"]
+
+
+def test_track_exception_listener_schedules_recovery_and_notifies_user(monkeypatch) -> None:
+    listener = object.__new__(Listeners)
+    order: list[str] = []
+    failed_track = SimpleNamespace(track_id="track-1", uri="https://example.com/1")
+
+    async def fake_send(_message, delete_after=None):
+        order.append("message")
+
+    async def fake_sleep(seconds):
+        order.append(f"sleep:{seconds}")
+
+    async def fake_stop():
+        order.append("stop")
+        player._current = None
+
+    async def fake_do_next():
+        order.append("do_next")
+
+    def fake_start_background_task(coro, label):
+        order.append(label)
+        return asyncio.create_task(coro)
+
+    player = SimpleNamespace(
+        _current=failed_track,
+        current=failed_track,
+        is_playing=True,
+        _tearing_down=False,
+        context=SimpleNamespace(send=fake_send),
+        guild=SimpleNamespace(id=123),
+        get_msg=lambda *_args: "Không thể phát bài này. Mình sẽ bỏ qua và phát bài tiếp theo sau 5 giây.",
+        stop=fake_stop,
+        do_next=fake_do_next,
+        _start_background_task=fake_start_background_task,
+        _track_exception_recovery_task=None,
+    )
+
+    monkeypatch.setattr("cogs.listeners.asyncio.sleep", fake_sleep)
+
+    async def run_test():
+        await Listeners.on_voicelink_track_exception(listener, player, failed_track, {"message": "Something broke when playing the track."})
+        task = player._track_exception_recovery_task
+        assert task is not None
+        await task
+
+    asyncio.run(run_test())
+
+    assert order == ["track_exception_recovery", "message", "sleep:5", "stop", "do_next"]
+
+
+def test_track_exception_recovery_skips_when_player_has_already_moved_on(monkeypatch) -> None:
+    listener = object.__new__(Listeners)
+    order: list[str] = []
+    failed_track = SimpleNamespace(track_id="track-1", uri="https://example.com/1")
+    next_track = SimpleNamespace(track_id="track-2", uri="https://example.com/2")
+
+    async def fake_send(_message, delete_after=None):
+        order.append("message")
+
+    async def fake_sleep(seconds):
+        order.append(f"sleep:{seconds}")
+        player._current = next_track
+        player.current = next_track
+
+    async def fake_stop():
+        order.append("stop")
+
+    async def fake_do_next():
+        order.append("do_next")
+
+    def fake_start_background_task(coro, label):
+        order.append(label)
+        return asyncio.create_task(coro)
+
+    player = SimpleNamespace(
+        _current=failed_track,
+        current=failed_track,
+        is_playing=True,
+        _tearing_down=False,
+        context=SimpleNamespace(send=fake_send),
+        guild=SimpleNamespace(id=123),
+        get_msg=lambda *_args: "Không thể phát bài này. Mình sẽ bỏ qua và phát bài tiếp theo sau 5 giây.",
+        stop=fake_stop,
+        do_next=fake_do_next,
+        _start_background_task=fake_start_background_task,
+        _track_exception_recovery_task=None,
+    )
+
+    monkeypatch.setattr("cogs.listeners.asyncio.sleep", fake_sleep)
+
+    async def run_test():
+        await Listeners.on_voicelink_track_exception(listener, player, failed_track, {"message": "Something broke when playing the track."})
+        task = player._track_exception_recovery_task
+        assert task is not None
+        await task
+
+    asyncio.run(run_test())
+
+    assert order == ["track_exception_recovery", "message", "sleep:5"]

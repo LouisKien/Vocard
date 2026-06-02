@@ -20,6 +20,7 @@ from voicelink.views.controller import (
     AutoPlay,
     Forward,
     Loop,
+    Lyrics,
     PlayPause,
     Skip,
     Stop,
@@ -689,6 +690,46 @@ def test_play_autocomplete_returns_empty_when_lookup_fails(monkeypatch) -> None:
     monkeypatch.setattr("cogs.basic.voicelink.NodePool.get_node", lambda: node)
 
     assert asyncio.run(cog.play_autocomplete(interaction, "spotify playlist")) == []
+
+
+def test_play_autocomplete_skips_remote_lookup_for_single_character_queries(monkeypatch) -> None:
+    interaction = SimpleNamespace(user=SimpleNamespace(id=1))
+    cog = Basic(_FakeBot())
+    node = SimpleNamespace()
+    called = False
+
+    async def fake_get_tracks(*_args, **_kwargs):
+        nonlocal called
+        called = True
+        return []
+
+    node.get_tracks = fake_get_tracks
+    monkeypatch.setattr("cogs.basic.voicelink.NodePool.get_node", lambda: node)
+
+    assert asyncio.run(cog.play_autocomplete(interaction, "A")) == []
+    assert called is False
+
+
+def test_play_autocomplete_limits_remote_lookup_time(monkeypatch) -> None:
+    interaction = SimpleNamespace(user=SimpleNamespace(id=1))
+    cog = Basic(_FakeBot())
+    node = SimpleNamespace()
+    captured = {}
+
+    async def fake_get_tracks(*_args, **_kwargs):
+        return []
+
+    async def fake_wait_for(awaitable, timeout):
+        captured["timeout"] = timeout
+        await awaitable
+        raise asyncio.TimeoutError()
+
+    node.get_tracks = fake_get_tracks
+    monkeypatch.setattr("cogs.basic.voicelink.NodePool.get_node", lambda: node)
+    monkeypatch.setattr("cogs.basic.asyncio.wait_for", fake_wait_for)
+
+    assert asyncio.run(cog.play_autocomplete(interaction, "spotify playlist")) == []
+    assert captured["timeout"] == 2.0
 
 
 def test_skip_stops_audio_before_sending_confirmation(monkeypatch) -> None:
@@ -1460,6 +1501,47 @@ def test_stop_button_sends_success_then_tears_down(monkeypatch) -> None:
     asyncio.run(button.callback(interaction))
 
     assert order == ["message", "teardown"]
+
+
+def test_lyrics_button_returns_not_found_when_provider_times_out(monkeypatch) -> None:
+    order: list[str] = []
+
+    async def fake_send_localized_message(*_args, **_kwargs):
+        order.append("message")
+        return None
+
+    async def fake_fetch_lyrics(_title, _artist):
+        raise AssertionError("controller should use voicelink.fetch_lyrics instead of raw provider access")
+
+    async def fake_safe_fetch(_title, _artist):
+        order.append("lookup")
+        return None
+
+    async def fake_defer():
+        order.append("defer")
+
+    player = SimpleNamespace(
+        is_playing=True,
+        current=SimpleNamespace(title="Song", author="Artist"),
+        is_privileged=lambda _user: True,
+        settings={"controller_msg": True},
+        _ph=SimpleNamespace(replace=lambda value, _data: value),
+    )
+    interaction = SimpleNamespace(
+        user=SimpleNamespace(),
+        response=SimpleNamespace(defer=fake_defer),
+    )
+    button = Lyrics(player=player, btn_data={"label": "lyrics"})
+    monkeypatch.setattr("voicelink.views.controller.send_localized_message", fake_send_localized_message)
+    monkeypatch.setattr("voicelink.views.controller.voicelink.fetch_lyrics", fake_safe_fetch)
+    monkeypatch.setattr(
+        "voicelink.views.controller.voicelink.LYRICS_PLATFORMS",
+        {"genius": fake_fetch_lyrics},
+    )
+
+    asyncio.run(button.callback(interaction))
+
+    assert order == ["defer", "lookup", "message"]
 
 
 def test_tracks_select_skips_to_selected_track_and_stops_playback(monkeypatch) -> None:

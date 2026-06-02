@@ -41,6 +41,7 @@ TRACK_EXCEPTION_STACK_MARKERS = (
     "Video player configuration error",
 )
 DEFAULT_TRACK_EXCEPTION_MESSAGE = "Không thể phát bài này. Mình sẽ bỏ qua và phát bài tiếp theo sau 5 giây."
+TRACK_EXCEPTION_RECOVERY_DELAY_SECONDS = 5
 
 def sanitize_track_exception_message(
     error: dict,
@@ -63,6 +64,21 @@ def sanitize_track_exception_message(
         return fallback
 
     return first_line[:240]
+
+
+def _is_same_track(left, right) -> bool:
+    if left is None or right is None:
+        return False
+    if left is right:
+        return True
+
+    for attr in ("track_id", "identifier", "uri"):
+        left_value = getattr(left, attr, None)
+        right_value = getattr(right, attr, None)
+        if left_value and right_value and left_value == right_value:
+            return True
+
+    return False
 
 class Listeners(commands.Cog):
     """Music Cog."""
@@ -173,10 +189,53 @@ class Listeners(commands.Cog):
         await asyncio.sleep(10)
         await player.do_next()
 
+    async def _recover_track_exception(self, player: voicelink.Player, failed_track) -> None:
+        await asyncio.sleep(TRACK_EXCEPTION_RECOVERY_DELAY_SECONDS)
+
+        if getattr(player, "_tearing_down", False):
+            return
+
+        current_track = getattr(player, "current", None) or getattr(player, "_current", None)
+        if current_track is not None and not _is_same_track(current_track, failed_track):
+            return
+
+        if current_track is not None and _is_same_track(current_track, failed_track):
+            try:
+                await player.stop()
+            except Exception as error:
+                func.logger.debug(
+                    "Failed to stop errored track in guild %s before recovery.",
+                    player.guild.id,
+                    exc_info=error,
+                )
+            finally:
+                if hasattr(player, "_current"):
+                    player._current = None
+
+        await player.do_next()
+
+    def _schedule_track_exception_recovery(self, player: voicelink.Player, failed_track) -> None:
+        active_task = getattr(player, "_track_exception_recovery_task", None)
+        if active_task and not active_task.done():
+            return
+
+        task = player._start_background_task(
+            self._recover_track_exception(player, failed_track),
+            "track_exception_recovery",
+        )
+        player._track_exception_recovery_task = task
+        if task:
+            def _clear_task(done_task):
+                if getattr(player, "_track_exception_recovery_task", None) is done_task:
+                    player._track_exception_recovery_task = None
+
+            task.add_done_callback(_clear_task)
+
     @commands.Cog.listener()
     async def on_voicelink_track_exception(self, player: voicelink.Player, track, error: dict):
+        self._schedule_track_exception_recovery(player, track)
+
         try:
-            player._track_is_stuck = True
             fallback = player.get_msg("player.errors.trackPlaybackFailed")
             if fallback == "Not found!":
                 fallback = DEFAULT_TRACK_EXCEPTION_MESSAGE

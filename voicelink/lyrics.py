@@ -23,6 +23,7 @@ SOFTWARE.
 
 import asyncio
 import aiohttp
+import logging
 import random
 import re
 import hmac
@@ -83,6 +84,7 @@ Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10_5_6; en-US) AppleWebKit/530.6 (KHTM
 Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10_5_6; en-US) AppleWebKit/530.5 (KHTML, like Gecko) Chrome/ Safari/530.5'''
 
 HTTP_TIMEOUT = aiohttp.ClientTimeout(total=10, connect=5, sock_connect=5, sock_read=10)
+LYRICS_LOOKUP_TIMEOUT_SECONDS = 12
 
 
 def _headers(extra: Optional[dict[str, str]] = None) -> dict[str, str]:
@@ -104,7 +106,7 @@ async def _fetch_text(
                 if response.status != 200:
                     return None
                 return await response.text()
-    except aiohttp.ClientError:
+    except (aiohttp.ClientError, asyncio.TimeoutError):
         return None
 
 
@@ -120,7 +122,7 @@ async def _fetch_json(
                 if response.status != 200:
                     return None
                 return await response.json()
-    except aiohttp.ClientError:
+    except (aiohttp.ClientError, asyncio.TimeoutError):
         return None
 
 class LyricsPlatform(ABC):
@@ -397,3 +399,27 @@ LYRICS_PLATFORMS: dict[str, Type[LyricsPlatform]] = {
     "lrclib": Lrclib,
     "musixmatch": MusixMatch
 }
+
+
+async def fetch_lyrics(title: str, artist: str) -> Optional[dict[str, str]]:
+    platform_name = Config().lyrics_platform
+    lyrics_platform = LYRICS_PLATFORMS.get(platform_name)
+    if not lyrics_platform:
+        return None
+
+    try:
+        return await asyncio.wait_for(
+            lyrics_platform().get_lyrics(title, artist),
+            timeout=LYRICS_LOOKUP_TIMEOUT_SECONDS,
+        )
+    except (aiohttp.ClientError, asyncio.TimeoutError):
+        return None
+    except Exception:
+        logging.getLogger("vocard").warning(
+            "Lyrics lookup failed for title=%r artist=%r on platform %s",
+            title,
+            artist,
+            platform_name,
+            exc_info=True,
+        )
+        return None

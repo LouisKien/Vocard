@@ -38,5 +38,5 @@ from .player import Player as Player, connect_channel as connect_channel
 from .placeholders import PlayerPlaceholder as PlayerPlaceholder, BotPlaceholder as BotPlaceholder
 from .mongodb import MongoDBHandler as MongoDBHandler
 from .language import LangHandler as LangHandler
-from .lyrics import LYRICS_PLATFORMS as LYRICS_PLATFORMS
+from .lyrics import LYRICS_PLATFORMS as LYRICS_PLATFORMS, fetch_lyrics as fetch_lyrics
 from .ipc import IPCClient as IPCClient

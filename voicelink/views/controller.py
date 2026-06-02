@@ -21,6 +21,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
 
+import logging
 import discord
 import re
 import voicelink
@@ -393,14 +394,21 @@ class Lyrics(ControlButton):
         title = self.player.current.title
         artist = self.player.current.author
         
-        lyrics_platform = voicelink.LYRICS_PLATFORMS.get(Config().lyrics_platform)
-        if lyrics_platform:
-            lyrics = await lyrics_platform().get_lyrics(title, artist)
-            if not lyrics:
-                return await self.send(interaction, "lyrics.notFound", ephemeral=True)
+        try:
+            lyrics = await voicelink.fetch_lyrics(title, artist)
+        except Exception as error:
+            logging.getLogger("vocard").warning(
+                "Lyrics lookup failed for controller request title=%r artist=%r",
+                title,
+                artist,
+                exc_info=error,
+            )
+            lyrics = None
+        if not lyrics:
+            return await self.send(interaction, "lyrics.notFound", ephemeral=True)
 
-            view = LyricsView(name=title, source={_: re.findall(r'.*\n(?:.*\n){,22}', v or "") for _, v in lyrics.items()}, author=interaction.user)
-            view.response = await self.send_embed(interaction, await view.build_embed(), view=view, ephemeral=True)
+        view = LyricsView(name=title, source={_: re.findall(r'.*\n(?:.*\n){,22}', v or "") for _, v in lyrics.items()}, author=interaction.user)
+        view.response = await self.send_embed(interaction, await view.build_embed(), view=view, ephemeral=True)
 
 class Tracks(ControlSelect):
     def __init__(self, player: "voicelink.Player", btn_data, **kwargs):
