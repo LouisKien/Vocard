@@ -256,3 +256,97 @@ def test_track_exception_recovery_skips_when_player_has_already_moved_on(monkeyp
     asyncio.run(run_test())
 
     assert order == ["track_exception_recovery", "message", "sleep:5"]
+
+
+def test_connect_node_with_retry_retries_until_success(monkeypatch) -> None:
+    listener = object.__new__(Listeners)
+    listener.bot = SimpleNamespace()
+    order: list[str] = []
+    attempts = {"count": 0}
+    backoff_delays = iter([1.5])
+
+    async def fake_create_node(**kwargs):
+        attempts["count"] += 1
+        order.append(f"create:{attempts['count']}")
+        if attempts["count"] == 1:
+            raise RuntimeError("not ready")
+        return SimpleNamespace(identifier=kwargs["identifier"], is_connected=True)
+
+    async def fake_sleep(delay):
+        order.append(f"sleep:{delay}")
+
+    class _FakeBackoff:
+        def __init__(self, base=7):
+            self.base = base
+
+        def delay(self):
+            return next(backoff_delays)
+
+    listener.voicelink = SimpleNamespace(create_node=fake_create_node, _nodes={})
+    monkeypatch.setattr("cogs.listeners.ExponentialBackoff", _FakeBackoff)
+    monkeypatch.setattr("cogs.listeners.asyncio.sleep", fake_sleep)
+
+    node = asyncio.run(
+        Listeners._connect_node_with_retry(
+            listener,
+            {"identifier": "DEFAULT", "host": "127.0.0.1", "port": 2333, "password": "pw"},
+        )
+    )
+
+    assert node.identifier == "DEFAULT"
+    assert order == ["create:1", "sleep:1.5", "create:2"]
+
+
+def test_connect_node_with_retry_reuses_existing_connected_node_without_duplicate_create(monkeypatch) -> None:
+    listener = object.__new__(Listeners)
+    listener.bot = SimpleNamespace()
+    existing_node = SimpleNamespace(is_connected=True, _identifier="DEFAULT")
+    create_called = False
+
+    async def fake_create_node(**kwargs):
+        nonlocal create_called
+        create_called = True
+        return SimpleNamespace(identifier=kwargs["identifier"], is_connected=True)
+
+    listener.voicelink = SimpleNamespace(create_node=fake_create_node, _nodes={"DEFAULT": existing_node})
+
+    node = asyncio.run(
+        Listeners._connect_node_with_retry(
+            listener,
+            {"identifier": "DEFAULT", "host": "127.0.0.1", "port": 2333, "password": "pw"},
+        )
+    )
+
+    assert node is existing_node
+    assert create_called is False
+
+
+def test_start_nodes_waits_until_ready_before_scheduling_retries(monkeypatch) -> None:
+    order: list[str] = []
+    listener = object.__new__(Listeners)
+
+    async def fake_wait_until_ready():
+        order.append("ready")
+
+    async def fake_connect_node_with_retry(node_config):
+        order.append(f"connect:{node_config['identifier']}")
+
+    class _FakeLoop:
+        def create_task(self, coro):
+            order.append("scheduled")
+            return asyncio.create_task(coro)
+
+    listener.bot = SimpleNamespace(wait_until_ready=fake_wait_until_ready, loop=_FakeLoop())
+    listener._connect_node_with_retry = fake_connect_node_with_retry
+
+    monkeypatch.setattr(
+        "cogs.listeners.Config",
+        lambda: SimpleNamespace(nodes={"DEFAULT": {"identifier": "DEFAULT"}, "FALLBACK": {"identifier": "FALLBACK"}}),
+    )
+
+    asyncio.run(Listeners.start_nodes(listener))
+
+    assert order[0] == "ready"
+    assert order.count("scheduled") == 2
+    assert "connect:DEFAULT" in order
+    assert "connect:FALLBACK" in order

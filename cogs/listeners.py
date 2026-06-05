@@ -31,6 +31,7 @@ from discord.ext import commands
 
 from voicelink import MongoDBHandler, Config
 from voicelink.utils import TempCtx
+from voicelink.utils import ExponentialBackoff
 
 TRACK_EXCEPTION_STACK_MARKERS = (
     "All clients failed",
@@ -89,14 +90,38 @@ class Listeners(commands.Cog):
 
         bot.loop.create_task(self.start_nodes())
         bot.loop.create_task(self.restore_last_session_players())
+
+    async def _connect_node_with_retry(self, node_config: dict) -> voicelink.Node:
+        identifier = node_config["identifier"]
+        backoff = ExponentialBackoff(base=7)
+
+        while True:
+            existing_node = self.voicelink._nodes.get(identifier)
+            if existing_node and existing_node.is_connected:
+                return existing_node
+
+            try:
+                if existing_node and hasattr(existing_node, "connect"):
+                    await existing_node.connect()
+                    return existing_node
+
+                return await self.voicelink.create_node(bot=self.bot, **node_config)
+            except Exception as error:
+                retry = backoff.delay()
+                func.logger.warning(
+                    "Node %s startup connection failed: %s. Retrying in %ss.",
+                    identifier,
+                    error,
+                    round(retry),
+                )
+                await asyncio.sleep(retry)
         
     async def start_nodes(self) -> None:
         """Connect and intiate nodes."""
-        for n in Config().nodes.values():
-            try:
-                await self.voicelink.create_node(bot=self.bot, **n)
-            except Exception as e:
-                func.logger.error(f'Node {n["identifier"]} is not able to connect! - Reason: {e}')
+        await self.bot.wait_until_ready()
+
+        for node_config in Config().nodes.values():
+            self.bot.loop.create_task(self._connect_node_with_retry(node_config))
 
     async def restore_last_session_players(self) -> None:
         """Re-establish connections for players from the last session."""
