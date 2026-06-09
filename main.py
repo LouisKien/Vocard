@@ -32,6 +32,7 @@ import function as func
 from discord.ext import commands
 from logging.handlers import TimedRotatingFileHandler
 from voicelink import Config, LangHandler, MongoDBHandler, IPCClient, VoicelinkException
+from voicelink.song_resolver import SongResolverServer
 from voicelink.utils import dispatch_message
 
 class Translator(discord.app_commands.Translator):
@@ -77,6 +78,7 @@ class Vocard(commands.Bot):
         super().__init__(*args, **kwargs)
 
         self.ipc_client: IPCClient
+        self.song_resolver_server: SongResolverServer | None = None
 
     def is_allowed_guild(self, guild_id: int | None) -> bool:
         return bot_config.is_allowed_guild(guild_id)
@@ -95,6 +97,11 @@ class Vocard(commands.Bot):
                 bot_config.server_id
             )
             await guild.leave()
+
+    async def close(self) -> None:
+        if self.song_resolver_server is not None:
+            await self.song_resolver_server.close()
+        await super().close()
 
     async def on_message(self, message: discord.Message, /) -> None:
         # Ignore messages from bots or DMs
@@ -139,6 +146,23 @@ class Vocard(commands.Bot):
     async def setup_hook(self) -> None:
         # Connecting to MongoDB
         await MongoDBHandler.init(bot_config.mongodb_url, bot_config.mongodb_name)
+
+        resolver_http = bot_config.resolver_http
+        if resolver_http.get("enable", True):
+            try:
+                self.song_resolver_server = SongResolverServer(
+                    host=str(resolver_http.get("host", "0.0.0.0")),
+                    port=int(resolver_http.get("port", 8081)),
+                )
+                await self.song_resolver_server.start()
+                func.logger.info(
+                    "Started song resolver HTTP server on %s:%s",
+                    resolver_http.get("host", "0.0.0.0"),
+                    resolver_http.get("port", 8081),
+                )
+            except Exception as exc:
+                self.song_resolver_server = None
+                func.logger.warning("Failed to start song resolver HTTP server: %s", exc)
 
         # Set translator
         await self.tree.set_translator(Translator())

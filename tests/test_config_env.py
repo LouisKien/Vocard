@@ -82,6 +82,9 @@ def test_load_settings_uses_defaults_and_env_overrides() -> None:
         LAVALINK_PASSWORD="youshallnotpass",
         LAVASRC_SPOTIFY_CLIENT_ID="spotify-client",
         LAVASRC_SPOTIFY_CLIENT_SECRET="spotify-secret",
+        VOCARD_RESOLVER_HTTP_ENABLE="true",
+        VOCARD_RESOLVER_HOST="127.0.0.1",
+        VOCARD_RESOLVER_PORT="8081",
         BOT_PREFIX="!",
         BOT_ACTIVITY_JSON=json.dumps(
             [{"type": "listening", "name": "/music", "status": "idle"}]
@@ -122,6 +125,9 @@ print(json.dumps(load_settings(), sort_keys=True))
     assert settings["nodes"]["DEFAULT"]["host"] == "lavalink"
     assert settings["nodes"]["DEFAULT"]["port"] == 2333
     assert settings["nodes"]["DEFAULT"]["password"] == "youshallnotpass"
+    assert settings["resolver_http"]["enable"] is True
+    assert settings["resolver_http"]["host"] == "127.0.0.1"
+    assert settings["resolver_http"]["port"] == 8081
 
 
 def test_config_accepts_missing_client_id_and_parses_required_env() -> None:

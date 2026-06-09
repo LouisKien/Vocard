@@ -52,6 +52,11 @@
         "secure": false,
         "enable": false
     },
+    "resolver_http": {
+        "host": "0.0.0.0",
+        "port": 8081,
+        "enable": true
+    },
     "timer_settings": {
         "bot_activity_update": 600,
         "inactive_player_cleanup": 600,

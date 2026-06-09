@@ -10,6 +10,7 @@ The Compose stack starts four services:
 - `lavalink`: `ghcr.io/lavalink-devs/lavalink:4.2.2`.
 - `spotify-tokener`: pinned `ghcr.io/topi314/spotify-tokener` helper for LavaSrc Spotify token refresh.
 - `mongo`: `mongo:4.4.29-focal` with a named persistent volume.
+- `song-resolver`: internal HTTP endpoint for keyword/URL metadata lookup used by external bots.
 
 Lavalink plugins are pinned in `lavalink/application.yml`:
 

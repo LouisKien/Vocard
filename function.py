@@ -184,6 +184,9 @@ def load_settings() -> dict[str, Any]:
     _apply_env_override(settings, "IPC_PORT", ("ipc_client", "port"), _parse_int)
     _apply_env_override(settings, "IPC_PASSWORD", ("ipc_client", "password"), lambda value: value if value not in {None, ""} else None)
     _apply_env_override(settings, "IPC_SECURE", ("ipc_client", "secure"), _parse_bool)
+    _apply_env_override(settings, "VOCARD_RESOLVER_HTTP_ENABLE", ("resolver_http", "enable"), _parse_bool)
+    _apply_env_override(settings, "VOCARD_RESOLVER_HOST", ("resolver_http", "host"), lambda value: value if value not in {None, ""} else None)
+    _apply_env_override(settings, "VOCARD_RESOLVER_PORT", ("resolver_http", "port"), _parse_int)
 
     _apply_env_override(settings, "BOT_ACTIVITY_UPDATE_SECONDS", ("timer_settings", "bot_activity_update"), _parse_int)
     _apply_env_override(settings, "INACTIVE_PLAYER_CLEANUP_SECONDS", ("timer_settings", "inactive_player_cleanup"), _parse_int)
