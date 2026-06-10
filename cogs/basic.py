@@ -39,7 +39,7 @@ from function import (
 )
 
 from voicelink import MongoDBHandler, LangHandler, Config
-from voicelink.song_resolver import search_songs
+from voicelink.song_resolver import resolve_song, search_songs
 from voicelink.views import SearchView, QueueView, LinkView, LyricsView, HelpView
 from voicelink.utils import format_ms, format_to_ms, truncate_string, dispatch_message, send_localized_message
 
@@ -50,6 +50,7 @@ SPOTIFY_PLAYLIST_URL_REGEX = re.compile(
 AUTOCOMPLETE_MIN_QUERY_LENGTH = 2
 AUTOCOMPLETE_LOOKUP_TIMEOUT_SECONDS = 2.0
 AUTOCOMPLETE_MAX_CHOICES = 5
+RESOLVER_FALLBACK_RESULT_LIMIT = 10
 
 async def nowplay(ctx: commands.Context, player: voicelink.Player):
     track = player.current
@@ -100,6 +101,82 @@ class Basic(commands.Cog):
         with suppress(discord.HTTPException, discord.NotFound, AttributeError):
             await message.delete()
 
+    @staticmethod
+    def _should_attempt_resolver_fallback(query: str) -> bool:
+        normalized_query = query.strip()
+        return bool(normalized_query) and not voicelink.pool.URL_REGEX.match(normalized_query)
+
+    async def _hydrate_resolved_tracks(
+        self,
+        player: voicelink.Player,
+        *,
+        canonical_urls: list[str],
+        requester: discord.Member | discord.User,
+        search_type: voicelink.SearchType | None = None,
+    ) -> list[voicelink.Track]:
+        tracks: list[voicelink.Track] = []
+        seen_urls: set[str] = set()
+
+        for canonical_url in canonical_urls:
+            normalized_url = canonical_url.strip()
+            if not normalized_url or normalized_url in seen_urls:
+                continue
+
+            seen_urls.add(normalized_url)
+
+            try:
+                loaded_tracks = await player.get_tracks(
+                    normalized_url,
+                    requester=requester,
+                    search_type=search_type,
+                )
+            except (asyncio.TimeoutError, aiohttp.ClientError, voicelink.NodeException, voicelink.TrackLoadError):
+                continue
+
+            if isinstance(loaded_tracks, voicelink.Playlist):
+                candidate_tracks = loaded_tracks.tracks
+            else:
+                candidate_tracks = loaded_tracks or []
+
+            if candidate_tracks:
+                tracks.append(candidate_tracks[0])
+
+        return tracks
+
+    async def _resolve_tracks_from_keyword(
+        self,
+        player: voicelink.Player,
+        *,
+        query: str,
+        requester: discord.Member | discord.User,
+        search_type: voicelink.SearchType | None = None,
+    ):
+        normalized_query = query.strip()
+        if not self._should_attempt_resolver_fallback(normalized_query):
+            return None
+
+        try:
+            if search_type is None:
+                resolved_track = await resolve_song(normalized_query)
+                canonical_urls = [resolved_track.canonical_url]
+            else:
+                resolved_tracks = await search_songs(
+                    normalized_query,
+                    search_type=search_type.name,
+                    limit=RESOLVER_FALLBACK_RESULT_LIMIT,
+                )
+                canonical_urls = [track.canonical_url for track in resolved_tracks]
+        except Exception:
+            return None
+
+        hydrated_tracks = await self._hydrate_resolved_tracks(
+            player,
+            canonical_urls=canonical_urls,
+            requester=requester,
+            search_type=search_type,
+        )
+        return hydrated_tracks or None
+
     async def _get_tracks_with_loading_notice(
         self,
         ctx: commands.Context | discord.Interaction,
@@ -120,8 +197,18 @@ class Basic(commands.Cog):
             )
 
         try:
-            return await player.get_tracks(query, requester=requester, search_type=search_type)
+            tracks = await player.get_tracks(query, requester=requester, search_type=search_type)
         except voicelink.TrackLoadError as error:
+            if self._should_attempt_resolver_fallback(query):
+                fallback_tracks = await self._resolve_tracks_from_keyword(
+                    player,
+                    query=query,
+                    requester=requester,
+                    search_type=search_type,
+                )
+                if fallback_tracks:
+                    return fallback_tracks
+                return None
             if self._is_spotify_playlist_query(query):
                 message = player.get_msg("player.errors.spotifyPlaylistLookupFailed")
                 if message == "Not found!":
@@ -140,6 +227,16 @@ class Basic(commands.Cog):
             raise voicelink.TrackLoadError(message) from error
         finally:
             await self._dismiss_temporary_message(loading_message)
+
+        if tracks:
+            return tracks
+
+        return await self._resolve_tracks_from_keyword(
+            player,
+            query=query,
+            requester=requester,
+            search_type=search_type,
+        )
 
     @staticmethod
     async def _refresh_controller_after_queue_add(

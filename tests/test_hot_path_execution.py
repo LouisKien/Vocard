@@ -834,6 +834,158 @@ def test_play_autocomplete_limits_remote_lookup_time(monkeypatch) -> None:
     assert captured == {"query": "vi sao", "limit": 5, "search_type": None}
 
 
+def test_play_falls_back_to_resolved_track_url_when_keyword_lookup_returns_empty(monkeypatch) -> None:
+    resolved_url = "https://www.youtube.com/watch?v=exact"
+    track = SimpleNamespace(
+        title="Vì Sao Tôi Là Gay",
+        uri=resolved_url,
+        author="MiiNa",
+        formatted_length="03:00",
+        is_stream=False,
+    )
+    requested_queries: list[str] = []
+    player = _FakePlayer(tracks=None, is_playing=False)
+    ctx = SimpleNamespace(
+        guild=SimpleNamespace(voice_client=player, id=123),
+        channel=SimpleNamespace(id=606),
+        author=SimpleNamespace(mention="@user"),
+        interaction=None,
+    )
+    cog = Basic(_FakeBot())
+
+    async def fake_get_tracks(query=None, requester=None, search_type=None, **_kwargs):
+        requested_queries.append(query)
+        player.order.append(f"get_tracks:{query}")
+        if query == "vì sao tôi là gay":
+            return None
+        if query == resolved_url:
+            return [track]
+        raise AssertionError(f"Unexpected query: {query!r}")
+
+    async def fake_resolve_song(query: str, *, search_type: str | None = None):
+        assert query == "vì sao tôi là gay"
+        assert search_type is None
+        return SimpleNamespace(canonical_url=resolved_url)
+
+    async def fake_dispatch_message(*_args, **_kwargs):
+        player.order.append("message")
+        return None
+
+    async def fake_send_localized_message(*_args, **_kwargs):
+        player.order.append("localized_message")
+        return None
+
+    player.get_tracks = fake_get_tracks
+    monkeypatch.setattr("cogs.basic.resolve_song", fake_resolve_song, raising=False)
+    monkeypatch.setattr("cogs.basic.dispatch_message", fake_dispatch_message)
+    monkeypatch.setattr("cogs.basic.send_localized_message", fake_send_localized_message)
+
+    asyncio.run(Basic.play.callback(cog, ctx, query="vì sao tôi là gay", start="0", end="0"))
+
+    assert requested_queries == ["vì sao tôi là gay", resolved_url]
+    assert "add_track" in player.order
+    assert "message" in player.order
+
+
+def test_search_falls_back_to_resolver_results_when_keyword_lookup_returns_empty(monkeypatch) -> None:
+    resolved_urls = [
+        "https://www.youtube.com/watch?v=1",
+        "https://www.youtube.com/watch?v=2",
+    ]
+    requested_queries: list[str] = []
+    tracks_by_url = {
+        resolved_urls[0]: [
+            SimpleNamespace(
+                title="Vì Sao Tôi Là Gay",
+                uri=resolved_urls[0],
+                author="MiiNa",
+                formatted_length="03:00",
+                is_stream=False,
+            )
+        ],
+        resolved_urls[1]: [
+            SimpleNamespace(
+                title="Vì Sao",
+                uri=resolved_urls[1],
+                author="Artist 2",
+                formatted_length="03:20",
+                is_stream=False,
+            )
+        ],
+    }
+    player = _FakePlayer(tracks=None, is_playing=True)
+    ctx = SimpleNamespace(
+        guild=SimpleNamespace(voice_client=player, id=123),
+        channel=SimpleNamespace(id=607),
+        author=SimpleNamespace(mention="@user"),
+        interaction=None,
+    )
+    cog = Basic(_FakeBot())
+
+    async def fake_get_tracks(query=None, requester=None, search_type=None, **_kwargs):
+        requested_queries.append(query)
+        player.order.append(f"get_tracks:{query}")
+        if query == "vì sao":
+            return None
+        if query in tracks_by_url:
+            return tracks_by_url[query]
+        raise AssertionError(f"Unexpected query: {query!r}")
+
+    async def fake_search_songs(query: str, *, limit: int = 10, search_type: str | None = None):
+        assert query == "vì sao"
+        assert limit == 10
+        assert search_type == voicelink.SearchType.YOUTUBE.name
+        return [
+            SimpleNamespace(canonical_url=resolved_urls[0]),
+            SimpleNamespace(canonical_url=resolved_urls[1]),
+        ]
+
+    class _FakeSearchView:
+        def __init__(self, *, tracks, texts):
+            self.tracks = tracks
+            self.texts = texts
+            self.values = ["1. Vì Sao Tôi Là Gay"]
+            self.response = None
+
+        async def wait(self):
+            return None
+
+    async def fake_dispatch_message(*_args, **kwargs):
+        if kwargs.get("view") is not None:
+            player.order.append("search_results")
+            return SimpleNamespace()
+        player.order.append("message")
+        return None
+
+    async def fake_send_localized_message(*_args, **_kwargs):
+        player.order.append("localized_message")
+        return None
+
+    async def fake_get_lang(*_args, **_kwargs):
+        return (
+            "Search: {}",
+            "{} {} {} {}",
+            "LIVE",
+            "TRACK_LOAD_POS",
+            "TRACK_LOAD",
+            "wait",
+            "success",
+        )
+
+    player.get_tracks = fake_get_tracks
+    monkeypatch.setattr("cogs.basic.search_songs", fake_search_songs)
+    monkeypatch.setattr("cogs.basic.SearchView", _FakeSearchView)
+    monkeypatch.setattr("cogs.basic.dispatch_message", fake_dispatch_message)
+    monkeypatch.setattr("cogs.basic.send_localized_message", fake_send_localized_message)
+    monkeypatch.setattr("cogs.basic.LangHandler.get_lang", fake_get_lang)
+
+    asyncio.run(Basic.search.callback(cog, ctx, query="vì sao", platform=voicelink.SearchType.YOUTUBE.name))
+
+    assert requested_queries == ["vì sao", resolved_urls[0], resolved_urls[1]]
+    assert player.order.index("search_results") < player.order.index("add_track")
+    assert player.order.index("message") < player.order.index("refresh_controller")
+
+
 def test_skip_stops_audio_before_sending_confirmation(monkeypatch) -> None:
     player = _FakePlayer(tracks=[], is_playing=True)
     ctx = SimpleNamespace(
