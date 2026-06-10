@@ -39,6 +39,7 @@ from function import (
 )
 
 from voicelink import MongoDBHandler, LangHandler, Config
+from voicelink.song_resolver import search_songs
 from voicelink.views import SearchView, QueueView, LinkView, LyricsView, HelpView
 from voicelink.utils import format_ms, format_to_ms, truncate_string, dispatch_message, send_localized_message
 
@@ -47,7 +48,6 @@ SPOTIFY_PLAYLIST_URL_REGEX = re.compile(
     re.IGNORECASE,
 )
 AUTOCOMPLETE_MIN_QUERY_LENGTH = 2
-AUTOCOMPLETE_LOOKUP_TIMEOUT_SECONDS = 2.0
 
 async def nowplay(ctx: commands.Context, player: voicelink.Player):
     track = player.current
@@ -164,25 +164,24 @@ class Basic(commands.Cog):
         if current:
             if len(current) < AUTOCOMPLETE_MIN_QUERY_LENGTH:
                 return []
-
-            node = voicelink.NodePool.get_node()
-            if not node:
-                return []
-            
             try:
-                tracks: list[voicelink.Track] = await asyncio.wait_for(
-                    node.get_tracks(current, requester=interaction.user),
-                    timeout=AUTOCOMPLETE_LOOKUP_TIMEOUT_SECONDS,
-                )
+                tracks = await search_songs(current, limit=5)
             except Exception:
                 return []
             if not tracks:
                 return []
-            
-            if isinstance(tracks, voicelink.Playlist):
-                tracks = tracks.tracks
 
-            return [app_commands.Choice(name=truncate_string(f"🎵 [{track.formatted_length}] {track.author} - {track.title}", 100), value=track.uri) for track in tracks]
+            choices: list[app_commands.Choice[str]] = []
+            for track in tracks[:25]:
+                duration_label = format_ms(track.duration_ms or 0)
+                value = track.canonical_url if len(track.canonical_url) <= 100 else current[:100]
+                choices.append(
+                    app_commands.Choice(
+                        name=truncate_string(f"🎵 [{duration_label}] {track.author} - {track.title}", 100),
+                        value=value,
+                    )
+                )
+            return choices
         
         history_source = MongoDBHandler.get_cached_user(interaction.user.id, d_type="history")
         if not history_source:

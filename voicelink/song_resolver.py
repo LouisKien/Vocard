@@ -6,6 +6,7 @@ import re
 import unicodedata
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlparse
 
 from aiohttp import web
 
@@ -16,7 +17,9 @@ from .objects import Playlist, Track
 from .pool import NodePool
 
 logger = logging.getLogger(__name__)
-AUTOCOMPLETE_LOOKUP_TIMEOUT_SECONDS = 2.0
+AUTOCOMPLETE_LOOKUP_TIMEOUT_SECONDS = 1.0
+AUTOCOMPLETE_DIRECT_LOOKUP_TIMEOUT_SECONDS = 1.8
+DIRECT_RESOLVE_TIMEOUT_SECONDS = 4.0
 _LOW_SIGNAL_TRACK_TERMS = {
     "cover",
     "karaoke",
@@ -65,7 +68,21 @@ async def resolve_song(query: str, *, search_type: str | None = None) -> Resolve
 
     node = NodePool.get_node()
     resolved_search_type = SearchType.from_platform(search_type) if search_type else Config().search_platform
-    track, is_playlist, playlist_name, track_count = await _lookup_first_track(node, normalized_query, resolved_search_type)
+    try:
+        track, is_playlist, playlist_name, track_count = await _lookup_first_track(
+            node,
+            normalized_query,
+            resolved_search_type,
+        )
+    except (NoNodesAvailable, TrackLoadError) as exc:
+        fallback = await _resolve_song_direct_fallback(
+            normalized_query,
+            search_type=resolved_search_type.name,
+        )
+        if fallback is not None:
+            logger.debug("Resolved %r through direct fallback after primary lookup failed: %s", normalized_query, exc)
+            return fallback
+        raise
     return _track_to_resolution(
         track,
         query=normalized_query,
@@ -95,12 +112,20 @@ async def search_songs(
             node.get_tracks(normalized_query, requester=None, search_type=resolved_search_type),
             timeout=AUTOCOMPLETE_LOOKUP_TIMEOUT_SECONDS,
         )
-    except (asyncio.TimeoutError, TrackLoadError) as exc:
+    except (asyncio.TimeoutError, NoNodesAvailable, TrackLoadError) as exc:
         logger.debug("Song resolver search returned no quick result for query=%r: %s", normalized_query, exc)
-        return []
+        return await _search_songs_direct_fallback(
+            normalized_query,
+            search_type=resolved_search_type.name,
+            limit=limit,
+        )
     if isinstance(tracks, Playlist):
         if not tracks.tracks:
-            return []
+            return await _search_songs_direct_fallback(
+                normalized_query,
+                search_type=resolved_search_type.name,
+                limit=limit,
+            )
         track_items = _rank_tracks(normalized_query, tracks.tracks)[:limit]
         return [
             _track_to_resolution(
@@ -114,7 +139,11 @@ async def search_songs(
             for track in track_items
         ]
     if not tracks:
-        return []
+        return await _search_songs_direct_fallback(
+            normalized_query,
+            search_type=resolved_search_type.name,
+            limit=limit,
+        )
     ranked_tracks = _rank_tracks(normalized_query, list(tracks))
     return [
         _track_to_resolution(
@@ -369,3 +398,169 @@ def _normalize_match_text(value: str) -> str:
     without_accents = "".join(char for char in decomposed if not unicodedata.combining(char))
     collapsed = re.sub(r"[^a-z0-9]+", " ", without_accents.lower())
     return " ".join(collapsed.split())
+
+
+async def _resolve_song_direct_fallback(query: str, *, search_type: str) -> ResolvedSong | None:
+    results = await _search_songs_direct_fallback(
+        query,
+        search_type=search_type,
+        limit=1,
+        timeout_seconds=DIRECT_RESOLVE_TIMEOUT_SECONDS,
+    )
+    if not results:
+        return None
+    return results[0]
+
+
+async def _search_songs_direct_fallback(
+    query: str,
+    *,
+    search_type: str,
+    limit: int,
+    timeout_seconds: float = AUTOCOMPLETE_DIRECT_LOOKUP_TIMEOUT_SECONDS,
+) -> list[ResolvedSong]:
+    if limit < 1:
+        return []
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(
+                _search_songs_directly,
+                query,
+                search_type,
+                limit,
+            ),
+            timeout=timeout_seconds,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Direct song fallback returned no result for query=%r: %s", query, exc, exc_info=True)
+        return []
+
+
+def _search_songs_directly(query: str, search_type: str, limit: int) -> list[ResolvedSong]:
+    ytdlp = _load_yt_dlp()
+    direct_limit = max(1, min(limit, 1))
+    candidates = _build_direct_candidates(query, limit=direct_limit)
+    last_error: Exception | None = None
+    with ytdlp.YoutubeDL(_ytdlp_options()) as ydl:
+        for candidate in candidates:
+            try:
+                info = ydl.extract_info(candidate, download=False)
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                continue
+            results = [
+                result
+                for result in (
+                    _resolved_song_from_ytdlp_entry(entry, query=query, search_type=search_type)
+                    for entry in _flatten_ytdlp_entries(info)
+                )
+                if result is not None
+            ]
+            if results:
+                return results[:direct_limit]
+    if last_error is not None:
+        raise last_error
+    return []
+
+
+def _build_direct_candidates(query: str, *, limit: int) -> list[str]:
+    normalized_query = query.strip()
+    if _is_probably_url(normalized_query):
+        return [normalized_query]
+    return [f"ytsearch{max(1, limit)}:{normalized_query}"]
+
+
+def _load_yt_dlp() -> Any:
+    try:
+        import yt_dlp  # type: ignore[import-not-found]
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(f"yt-dlp is unavailable: {exc}") from exc
+    return yt_dlp
+
+
+def _ytdlp_options() -> dict[str, Any]:
+    return {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "extract_flat": "in_playlist",
+    }
+
+
+def _flatten_ytdlp_entries(info: dict[str, Any]) -> list[dict[str, Any]]:
+    entries = info.get("entries")
+    if isinstance(entries, list) and entries:
+        flattened: list[dict[str, Any]] = []
+        for entry in entries:
+            if isinstance(entry, dict):
+                flattened.extend(_flatten_ytdlp_entries(entry))
+        return flattened
+    return [info] if isinstance(info, dict) else []
+
+
+def _resolved_song_from_ytdlp_entry(
+    entry: dict[str, Any],
+    *,
+    query: str,
+    search_type: str,
+) -> ResolvedSong | None:
+    canonical_url = _ytdlp_entry_url(entry, query=query)
+    if not canonical_url:
+        return None
+    title = str(entry.get("title") or query).strip() or query
+    author = str(
+        entry.get("uploader")
+        or entry.get("channel")
+        or entry.get("artist")
+        or "Unknown"
+    ).strip() or "Unknown"
+    duration_seconds = _coerce_int(entry.get("duration"))
+    duration_ms = duration_seconds * 1000 if duration_seconds is not None else None
+    thumbnail = str(entry.get("thumbnail") or "").strip() or None
+    return ResolvedSong(
+        query=query,
+        search_type=search_type,
+        title=title,
+        author=author,
+        source=_infer_source_from_url(canonical_url),
+        canonical_url=canonical_url,
+        search_query=f"{title} {author}".strip(),
+        thumbnail=thumbnail,
+        duration_ms=duration_ms,
+        album_name=None,
+        album_url=None,
+        artist_url=None,
+        preview_url=None,
+        is_preview=False,
+        track_id=str(entry.get("id") or "").strip() or None,
+        is_playlist=False,
+        playlist_name=None,
+        track_count=1,
+        resolved_by="direct",
+    )
+
+
+def _ytdlp_entry_url(entry: dict[str, Any], *, query: str) -> str | None:
+    for key in ("webpage_url", "url", "original_url"):
+        value = str(entry.get(key) or "").strip()
+        if _is_probably_url(value):
+            return value
+    entry_id = str(entry.get("id") or "").strip()
+    extractor = str(entry.get("extractor_key") or entry.get("ie_key") or "").lower()
+    if entry_id and "youtube" in extractor:
+        return f"https://www.youtube.com/watch?v={entry_id}"
+    return query if _is_probably_url(query) else None
+
+
+def _infer_source_from_url(url: str) -> str:
+    hostname = urlparse(url).netloc.lower()
+    if "soundcloud.com" in hostname:
+        return "soundcloud"
+    if "spotify.com" in hostname:
+        return "spotify"
+    return "youtube"
+
+
+def _is_probably_url(value: str) -> bool:
+    parsed = urlparse(value)
+    return bool(parsed.scheme and parsed.netloc)

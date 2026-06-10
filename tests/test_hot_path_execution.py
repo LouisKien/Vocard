@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import logging
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -686,10 +687,39 @@ def test_play_autocomplete_returns_empty_when_lookup_fails(monkeypatch) -> None:
     async def fake_get_tracks(*_args, **_kwargs):
         raise aiohttp.client_exceptions.SocketTimeoutError("Timeout on reading data from socket")
 
+    class FakeYoutubeDL:
+        def __init__(self, _options: dict[str, object]) -> None:
+            return None
+
+        def __enter__(self) -> "FakeYoutubeDL":
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def extract_info(self, query: str, download: bool = False) -> dict[str, object]:
+            assert query == "ytsearch1:spotify playlist"
+            assert download is False
+            return {
+                "entries": [
+                    {
+                        "title": "Spotify Playlist Song",
+                        "uploader": "Fallback Artist",
+                        "webpage_url": "https://www.youtube.com/watch?v=fallback",
+                        "duration": 215,
+                    }
+                ]
+            }
+
     node.get_tracks = fake_get_tracks
     monkeypatch.setattr("cogs.basic.voicelink.NodePool.get_node", lambda: node)
+    monkeypatch.setitem(sys.modules, "yt_dlp", SimpleNamespace(YoutubeDL=FakeYoutubeDL))
 
-    assert asyncio.run(cog.play_autocomplete(interaction, "spotify playlist")) == []
+    choices = asyncio.run(cog.play_autocomplete(interaction, "spotify playlist"))
+
+    assert len(choices) == 1
+    assert choices[0].name.startswith("🎵 [03:35] Fallback Artist - Spotify Playlist Song")
+    assert choices[0].value == "https://www.youtube.com/watch?v=fallback"
 
 
 def test_play_autocomplete_skips_remote_lookup_for_single_character_queries(monkeypatch) -> None:
@@ -714,13 +744,13 @@ def test_play_autocomplete_limits_remote_lookup_time(monkeypatch) -> None:
     interaction = SimpleNamespace(user=SimpleNamespace(id=1))
     cog = Basic(_FakeBot())
     node = SimpleNamespace()
-    captured = {}
+    captured: list[float] = []
 
     async def fake_get_tracks(*_args, **_kwargs):
         return []
 
     async def fake_wait_for(awaitable, timeout):
-        captured["timeout"] = timeout
+        captured.append(timeout)
         await awaitable
         raise asyncio.TimeoutError()
 
@@ -729,7 +759,7 @@ def test_play_autocomplete_limits_remote_lookup_time(monkeypatch) -> None:
     monkeypatch.setattr("cogs.basic.asyncio.wait_for", fake_wait_for)
 
     assert asyncio.run(cog.play_autocomplete(interaction, "spotify playlist")) == []
-    assert captured["timeout"] == 2.0
+    assert captured == [1.0, 1.8]
 
 
 def test_skip_stops_audio_before_sending_confirmation(monkeypatch) -> None:

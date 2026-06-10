@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -150,6 +151,98 @@ def test_search_songs_ranks_exact_match_first(monkeypatch: pytest.MonkeyPatch) -
     results = asyncio.run(search_songs("Vì Sao Tôi Là Gay", search_type="youtube", limit=2))
 
     assert [item.title for item in results] == ["Vì Sao Tôi Là Gay", "Bài khác hoàn toàn"]
+
+
+def test_search_songs_falls_back_to_direct_lookup_when_primary_search_is_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeNode:
+        async def get_tracks(self, query: str, *, requester: object, search_type: object) -> list[object] | None:
+            assert query == "Feels"
+            assert requester is None
+            assert getattr(search_type, "name", None) == "YOUTUBE"
+            return None
+
+    class FakeYoutubeDL:
+        def __init__(self, _options: dict[str, object]) -> None:
+            return None
+
+        def __enter__(self) -> "FakeYoutubeDL":
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def extract_info(self, query: str, download: bool = False) -> dict[str, object]:
+            assert query == "ytsearch1:Feels"
+            assert download is False
+            return {
+                "entries": [
+                    {
+                        "title": "Calvin Harris - Feels",
+                        "uploader": "Calvin Harris",
+                        "webpage_url": "https://www.youtube.com/watch?v=ozv4q2ov3Mk",
+                        "duration": 223,
+                        "thumbnail": "https://img.example/feels.jpg",
+                    }
+                ]
+            }
+
+    monkeypatch.setattr(NodePool, "get_node", classmethod(lambda cls, identifier=None: FakeNode()))
+    monkeypatch.setitem(sys.modules, "yt_dlp", SimpleNamespace(YoutubeDL=FakeYoutubeDL))
+
+    results = asyncio.run(search_songs("Feels", search_type="youtube", limit=5))
+
+    assert len(results) == 1
+    assert results[0].title == "Calvin Harris - Feels"
+    assert results[0].canonical_url == "https://www.youtube.com/watch?v=ozv4q2ov3Mk"
+    assert results[0].duration_ms == 223000
+
+
+def test_resolve_song_falls_back_to_direct_lookup_when_primary_search_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeNode:
+        async def get_tracks(self, query: str, *, requester: object, search_type: object) -> list[object] | None:
+            assert query == "All Falls Down"
+            assert requester is None
+            assert getattr(search_type, "name", None) == "YOUTUBE"
+            return None
+
+    class FakeYoutubeDL:
+        def __init__(self, _options: dict[str, object]) -> None:
+            return None
+
+        def __enter__(self) -> "FakeYoutubeDL":
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def extract_info(self, query: str, download: bool = False) -> dict[str, object]:
+            assert query == "ytsearch1:All Falls Down"
+            assert download is False
+            return {
+                "entries": [
+                    {
+                        "title": "Alan Walker - All Falls Down",
+                        "uploader": "Alan Walker",
+                        "webpage_url": "https://www.youtube.com/watch?v=6RLLOEzdxsM",
+                        "duration": 211,
+                        "thumbnail": "https://img.example/all-falls-down.jpg",
+                    }
+                ]
+            }
+
+    monkeypatch.setattr(NodePool, "get_node", classmethod(lambda cls, identifier=None: FakeNode()))
+    monkeypatch.setitem(sys.modules, "yt_dlp", SimpleNamespace(YoutubeDL=FakeYoutubeDL))
+
+    result = asyncio.run(resolve_song("All Falls Down", search_type="youtube"))
+
+    assert result.title == "Alan Walker - All Falls Down"
+    assert result.author == "Alan Walker"
+    assert result.canonical_url == "https://www.youtube.com/watch?v=6RLLOEzdxsM"
+    assert result.duration_ms == 211000
 
 
 def test_song_resolver_http_resolve_response_is_flat(monkeypatch: pytest.MonkeyPatch) -> None:
