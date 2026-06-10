@@ -39,6 +39,7 @@ from function import (
 )
 
 from voicelink import MongoDBHandler, LangHandler, Config
+from voicelink.song_resolver import search_songs
 from voicelink.views import SearchView, QueueView, LinkView, LyricsView, HelpView
 from voicelink.utils import format_ms, format_to_ms, truncate_string, dispatch_message, send_localized_message
 
@@ -165,27 +166,17 @@ class Basic(commands.Cog):
         if current:
             if len(current) < AUTOCOMPLETE_MIN_QUERY_LENGTH:
                 return []
-            node = voicelink.NodePool.get_node()
-            if not node:
-                return []
-
             try:
-                tracks: list[voicelink.Track] = await asyncio.wait_for(
-                    node.get_tracks(current, requester=interaction.user),
-                    timeout=AUTOCOMPLETE_LOOKUP_TIMEOUT_SECONDS,
-                )
+                tracks = await search_songs(current, limit=AUTOCOMPLETE_MAX_CHOICES)
             except Exception:
                 return []
             if not tracks:
                 return []
-            
-            if isinstance(tracks, voicelink.Playlist):
-                tracks = tracks.tracks
 
             return [
                 app_commands.Choice(
-                    name=truncate_string(f"🎵 [{track.formatted_length}] {track.author} - {track.title}", 100),
-                    value=track.uri,
+                    name=truncate_string(f"🎵 [{format_ms(track.duration_ms or 0)}] {track.author} - {track.title}", 100),
+                    value=track.canonical_url,
                 )
                 for track in tracks[:AUTOCOMPLETE_MAX_CHOICES]
             ]

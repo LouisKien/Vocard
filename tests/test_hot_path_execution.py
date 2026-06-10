@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import logging
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -686,35 +687,73 @@ def test_play_autocomplete_returns_empty_when_lookup_fails(monkeypatch) -> None:
     async def fake_get_tracks(*_args, **_kwargs):
         raise aiohttp.client_exceptions.SocketTimeoutError("Timeout on reading data from socket")
 
+    class FakeYoutubeDL:
+        def __init__(self, _options: dict[str, object]) -> None:
+            return None
+
+        def __enter__(self) -> "FakeYoutubeDL":
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def extract_info(self, query: str, download: bool = False) -> dict[str, object]:
+            assert query == "ytsearch5:vi sao"
+            assert download is False
+            return {
+                "entries": [
+                    {
+                        "title": "Vì Sao Tôi Là Gay",
+                        "uploader": "MiiNa",
+                        "webpage_url": "https://www.youtube.com/watch?v=exact-1",
+                        "duration": 180,
+                    },
+                    {
+                        "title": "Vì Sao",
+                        "uploader": "Artist 2",
+                        "webpage_url": "https://www.youtube.com/watch?v=exact-2",
+                        "duration": 200,
+                    },
+                ]
+            }
+
     node.get_tracks = fake_get_tracks
     monkeypatch.setattr("cogs.basic.voicelink.NodePool.get_node", lambda: node)
+    monkeypatch.setitem(sys.modules, "yt_dlp", SimpleNamespace(YoutubeDL=FakeYoutubeDL))
 
-    assert asyncio.run(cog.play_autocomplete(interaction, "spotify playlist")) == []
+    choices = asyncio.run(cog.play_autocomplete(interaction, "vi sao"))
+
+    assert len(choices) == 2
+    assert choices[0].name.startswith("🎵 [03:00] MiiNa - Vì Sao Tôi Là Gay")
+    assert choices[0].value == "https://www.youtube.com/watch?v=exact-1"
+    assert choices[1].name.startswith("🎵 [03:20] Artist 2 - Vì Sao")
+    assert choices[1].value == "https://www.youtube.com/watch?v=exact-2"
 
 
 def test_play_autocomplete_returns_multiple_tracks_from_lavalink_lookup(monkeypatch) -> None:
     interaction = SimpleNamespace(user=SimpleNamespace(id=1))
     cog = Basic(_FakeBot())
-    node = SimpleNamespace()
 
-    async def fake_get_tracks(*_args, **_kwargs):
+    async def fake_search_songs(query: str, *, limit: int = 10, search_type: str | None = None):
+        assert query == "song"
+        assert limit == 5
+        assert search_type is None
         return [
             SimpleNamespace(
-                formatted_length="03:00",
+                duration_ms=180000,
                 author="Artist 1",
                 title="Song 1",
-                uri="https://www.youtube.com/watch?v=1",
+                canonical_url="https://www.youtube.com/watch?v=1",
             ),
             SimpleNamespace(
-                formatted_length="03:30",
+                duration_ms=210000,
                 author="Artist 2",
                 title="Song 2",
-                uri="https://www.youtube.com/watch?v=2",
+                canonical_url="https://www.youtube.com/watch?v=2",
             ),
         ]
 
-    node.get_tracks = fake_get_tracks
-    monkeypatch.setattr("cogs.basic.voicelink.NodePool.get_node", lambda: node)
+    monkeypatch.setattr("cogs.basic.search_songs", fake_search_songs)
 
     choices = asyncio.run(cog.play_autocomplete(interaction, "song"))
 
@@ -731,21 +770,22 @@ def test_play_autocomplete_returns_multiple_tracks_from_lavalink_lookup(monkeypa
 def test_play_autocomplete_caps_keyword_results_at_five_choices(monkeypatch) -> None:
     interaction = SimpleNamespace(user=SimpleNamespace(id=1))
     cog = Basic(_FakeBot())
-    node = SimpleNamespace()
 
-    async def fake_get_tracks(*_args, **_kwargs):
+    async def fake_search_songs(query: str, *, limit: int = 10, search_type: str | None = None):
+        assert query == "song"
+        assert limit == 5
+        assert search_type is None
         return [
             SimpleNamespace(
-                formatted_length=f"03:0{index}",
+                duration_ms=(180 + index) * 1000,
                 author=f"Artist {index}",
                 title=f"Song {index}",
-                uri=f"https://www.youtube.com/watch?v={index}",
+                canonical_url=f"https://www.youtube.com/watch?v={index}",
             )
             for index in range(1, 8)
         ]
 
-    node.get_tracks = fake_get_tracks
-    monkeypatch.setattr("cogs.basic.voicelink.NodePool.get_node", lambda: node)
+    monkeypatch.setattr("cogs.basic.search_songs", fake_search_songs)
 
     choices = asyncio.run(cog.play_autocomplete(interaction, "song"))
 
@@ -780,23 +820,18 @@ def test_play_autocomplete_skips_remote_lookup_for_single_character_queries(monk
 def test_play_autocomplete_limits_remote_lookup_time(monkeypatch) -> None:
     interaction = SimpleNamespace(user=SimpleNamespace(id=1))
     cog = Basic(_FakeBot())
-    node = SimpleNamespace()
-    captured: list[float] = []
+    captured: dict[str, object] = {}
 
-    async def fake_get_tracks(*_args, **_kwargs):
+    async def fake_search_songs(query: str, *, limit: int = 10, search_type: str | None = None):
+        captured["query"] = query
+        captured["limit"] = limit
+        captured["search_type"] = search_type
         return []
 
-    async def fake_wait_for(awaitable, timeout):
-        captured.append(timeout)
-        await awaitable
-        raise asyncio.TimeoutError()
+    monkeypatch.setattr("cogs.basic.search_songs", fake_search_songs, raising=False)
 
-    node.get_tracks = fake_get_tracks
-    monkeypatch.setattr("cogs.basic.voicelink.NodePool.get_node", lambda: node)
-    monkeypatch.setattr("cogs.basic.asyncio.wait_for", fake_wait_for)
-
-    assert asyncio.run(cog.play_autocomplete(interaction, "spotify playlist")) == []
-    assert captured == [2.0]
+    assert asyncio.run(cog.play_autocomplete(interaction, "vi sao")) == []
+    assert captured == {"query": "vi sao", "limit": 5, "search_type": None}
 
 
 def test_skip_stops_audio_before_sending_confirmation(monkeypatch) -> None:
