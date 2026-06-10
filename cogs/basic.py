@@ -47,6 +47,10 @@ SPOTIFY_PLAYLIST_URL_REGEX = re.compile(
     r"^https?://open\.spotify\.com/playlist/[A-Za-z0-9]+(?:\?.*)?$",
     re.IGNORECASE,
 )
+SPOTIFY_TRACK_URL_REGEX = re.compile(
+    r"^https?://open\.spotify\.com/track/[A-Za-z0-9]+(?:\?.*)?$",
+    re.IGNORECASE,
+)
 AUTOCOMPLETE_MIN_QUERY_LENGTH = 2
 AUTOCOMPLETE_LOOKUP_TIMEOUT_SECONDS = 2.0
 AUTOCOMPLETE_MAX_CHOICES = 5
@@ -94,6 +98,10 @@ class Basic(commands.Cog):
         return bool(SPOTIFY_PLAYLIST_URL_REGEX.match(query.strip()))
 
     @staticmethod
+    def _is_spotify_track_query(query: str) -> bool:
+        return bool(SPOTIFY_TRACK_URL_REGEX.match(query.strip()))
+
+    @staticmethod
     async def _dismiss_temporary_message(message: discord.Message | None) -> None:
         if not message or not hasattr(message, "delete"):
             return
@@ -102,9 +110,48 @@ class Basic(commands.Cog):
             await message.delete()
 
     @staticmethod
+    def _is_track_lookup_target_available(target: object) -> bool:
+        node = getattr(target, "node", None)
+        if node is None:
+            return True
+        if getattr(node, "_available", True) is False:
+            return False
+        if getattr(node, "is_connected", True) is False:
+            return False
+        return True
+
+    @staticmethod
+    def _track_lookup_targets(player: voicelink.Player) -> list[object]:
+        targets: list[object] = []
+
+        if player and Basic._is_track_lookup_target_available(player):
+            targets.append(player)
+
+        try:
+            fallback_node = voicelink.NodePool.get_node()
+        except Exception:
+            fallback_node = None
+
+        player_node = getattr(player, "node", None)
+        if (
+            fallback_node
+            and Basic._is_track_lookup_target_available(fallback_node)
+            and fallback_node is not player_node
+        ):
+            targets.append(fallback_node)
+
+        if player and player not in targets:
+            targets.append(player)
+
+        return targets
+
+    @staticmethod
     def _should_attempt_resolver_fallback(query: str) -> bool:
         normalized_query = query.strip()
-        return bool(normalized_query) and not voicelink.pool.URL_REGEX.match(normalized_query)
+        return bool(normalized_query) and (
+            Basic._is_spotify_track_query(normalized_query)
+            or not voicelink.pool.URL_REGEX.match(normalized_query)
+        )
 
     @staticmethod
     def _resolution_identifiers(resolved_track: object) -> list[str]:
@@ -114,6 +161,8 @@ class Basic(commands.Cog):
         resolved_by = str(getattr(resolved_track, "resolved_by", "") or "").strip().lower()
 
         identifiers: list[str] = []
+        if search_query and source == "spotify":
+            identifiers.append(search_query)
         if search_query and source == "youtube" and resolved_by == "direct":
             identifiers.append(search_query)
         if canonical_url:
@@ -132,6 +181,7 @@ class Basic(commands.Cog):
     ) -> list[voicelink.Track]:
         tracks: list[voicelink.Track] = []
         seen_identifiers: set[str] = set()
+        lookup_targets = self._track_lookup_targets(player)
 
         for resolved_track in resolved_tracks:
             for identifier in self._resolution_identifiers(resolved_track):
@@ -140,23 +190,28 @@ class Basic(commands.Cog):
 
                 seen_identifiers.add(identifier)
 
-                try:
-                    loaded_tracks = await player.get_tracks(
-                        identifier,
-                        requester=requester,
-                        search_type=search_type,
-                    )
-                except (asyncio.TimeoutError, aiohttp.ClientError, voicelink.NodeException, voicelink.TrackLoadError):
+                for lookup_target in lookup_targets:
+                    try:
+                        loaded_tracks = await lookup_target.get_tracks(
+                            identifier,
+                            requester=requester,
+                            search_type=search_type,
+                        )
+                    except (asyncio.TimeoutError, aiohttp.ClientError, voicelink.NodeException, voicelink.TrackLoadError):
+                        continue
+
+                    if isinstance(loaded_tracks, voicelink.Playlist):
+                        candidate_tracks = loaded_tracks.tracks
+                    else:
+                        candidate_tracks = loaded_tracks or []
+
+                    if candidate_tracks:
+                        tracks.append(candidate_tracks[0])
+                        break
+                else:
                     continue
 
-                if isinstance(loaded_tracks, voicelink.Playlist):
-                    candidate_tracks = loaded_tracks.tracks
-                else:
-                    candidate_tracks = loaded_tracks or []
-
-                if candidate_tracks:
-                    tracks.append(candidate_tracks[0])
-                    break
+                break
 
         return tracks
 

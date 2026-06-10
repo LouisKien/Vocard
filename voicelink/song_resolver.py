@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import unicodedata
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
-from aiohttp import web
+from aiohttp import BasicAuth, ClientSession, ClientTimeout, web
 
 from .config import Config
 from .enums import SearchType
@@ -21,6 +22,14 @@ AUTOCOMPLETE_LOOKUP_TIMEOUT_SECONDS = 2.0
 AUTOCOMPLETE_DIRECT_LOOKUP_TIMEOUT_SECONDS = 1.8
 DIRECT_RESOLVE_TIMEOUT_SECONDS = 4.0
 AUTOCOMPLETE_DIRECT_RESULT_LIMIT = 5
+SPOTIFY_TRACK_API_TIMEOUT_SECONDS = 12.0
+SPOTIFY_TRACK_URL_REGEX = re.compile(
+    r"^https?://open\.spotify\.com/track/([A-Za-z0-9]+)(?:\?.*)?$",
+    re.IGNORECASE,
+)
+SPOTIFY_TOKEN_ENDPOINT = "https://accounts.spotify.com/api/token"
+SPOTIFY_TRACK_API_ENDPOINT = "https://api.spotify.com/v1/tracks/{track_id}"
+SPOTIFY_OEMBED_ENDPOINT = "https://open.spotify.com/oembed"
 _LOW_SIGNAL_TRACK_TERMS = {
     "cover",
     "karaoke",
@@ -76,6 +85,13 @@ async def resolve_song(query: str, *, search_type: str | None = None) -> Resolve
             resolved_search_type,
         )
     except (NoNodesAvailable, TrackLoadError) as exc:
+        spotify_fallback = await _resolve_spotify_track_fallback(
+            normalized_query,
+            search_type=resolved_search_type.name,
+        )
+        if spotify_fallback is not None:
+            logger.debug("Resolved %r through Spotify metadata fallback after primary lookup failed: %s", normalized_query, exc)
+            return spotify_fallback
         if not _should_allow_direct_fallback(normalized_query, search_type=resolved_search_type):
             raise
         fallback = await _resolve_song_direct_fallback(
@@ -117,6 +133,13 @@ async def search_songs(
         )
     except (asyncio.TimeoutError, NoNodesAvailable, TrackLoadError) as exc:
         logger.debug("Song resolver search returned no quick result for query=%r: %s", normalized_query, exc)
+        spotify_fallback = await _search_spotify_track_fallback(
+            normalized_query,
+            search_type=resolved_search_type.name,
+            limit=limit,
+        )
+        if spotify_fallback:
+            return spotify_fallback
         if not _should_allow_direct_fallback(normalized_query, search_type=resolved_search_type):
             return []
         return await _search_songs_direct_fallback(
@@ -126,6 +149,13 @@ async def search_songs(
         )
     if isinstance(tracks, Playlist):
         if not tracks.tracks:
+            spotify_fallback = await _search_spotify_track_fallback(
+                normalized_query,
+                search_type=resolved_search_type.name,
+                limit=limit,
+            )
+            if spotify_fallback:
+                return spotify_fallback
             if not _should_allow_direct_fallback(normalized_query, search_type=resolved_search_type):
                 return []
             return await _search_songs_direct_fallback(
@@ -146,6 +176,13 @@ async def search_songs(
             for track in track_items
         ]
     if not tracks:
+        spotify_fallback = await _search_spotify_track_fallback(
+            normalized_query,
+            search_type=resolved_search_type.name,
+            limit=limit,
+        )
+        if spotify_fallback:
+            return spotify_fallback
         if not _should_allow_direct_fallback(normalized_query, search_type=resolved_search_type):
             return []
         return await _search_songs_direct_fallback(
@@ -351,6 +388,14 @@ def _coerce_limit(value: Any, *, default: int, maximum: int) -> int:
     return max(1, min(maximum, parsed))
 
 
+def _first_nonempty_env(*names: str) -> str | None:
+    for name in names:
+        value = str(os.getenv(name) or "").strip()
+        if value:
+            return value
+    return None
+
+
 def _rank_tracks(query: str, tracks: list[Track]) -> list[Track]:
     return sorted(
         tracks,
@@ -421,6 +466,37 @@ async def _resolve_song_direct_fallback(query: str, *, search_type: str) -> Reso
     return results[0]
 
 
+async def _search_spotify_track_fallback(
+    query: str,
+    *,
+    search_type: str,
+    limit: int,
+) -> list[ResolvedSong]:
+    if limit < 1:
+        return []
+    resolved = await _resolve_spotify_track_fallback(query, search_type=search_type)
+    return [resolved] if resolved is not None else []
+
+
+async def _resolve_spotify_track_fallback(query: str, *, search_type: str) -> ResolvedSong | None:
+    track_id = _extract_spotify_track_id(query)
+    if not track_id:
+        return None
+
+    metadata = await _fetch_spotify_track_api_metadata(track_id)
+    if metadata is None:
+        metadata = await _fetch_spotify_track_oembed_metadata(query)
+    if metadata is None:
+        return None
+
+    return _resolved_song_from_spotify_metadata(
+        query=query,
+        search_type=search_type,
+        track_id=track_id,
+        metadata=metadata,
+    )
+
+
 async def _search_songs_direct_fallback(
     query: str,
     *,
@@ -486,6 +562,13 @@ def _should_allow_direct_fallback(query: str, *, search_type: SearchType) -> boo
     if _is_probably_url(normalized_query):
         return not _is_spotify_url(normalized_query)
     return search_type in {SearchType.YOUTUBE, SearchType.YOUTUBE_MUSIC}
+
+
+def _extract_spotify_track_id(value: str) -> str | None:
+    match = SPOTIFY_TRACK_URL_REGEX.match(value.strip())
+    if not match:
+        return None
+    return match.group(1)
 
 
 def _load_yt_dlp() -> Any:
@@ -577,6 +660,144 @@ def _infer_source_from_url(url: str) -> str:
     if "spotify.com" in hostname:
         return "spotify"
     return "youtube"
+
+
+async def _fetch_spotify_track_api_metadata(track_id: str) -> dict[str, Any] | None:
+    client_id = _first_nonempty_env("LAVASRC_SPOTIFY_CLIENT_ID", "SPOTIFY_CLIENT_ID")
+    client_secret = _first_nonempty_env("LAVASRC_SPOTIFY_CLIENT_SECRET", "SPOTIFY_CLIENT_SECRET")
+    if not client_id or not client_secret:
+        return None
+
+    timeout = ClientTimeout(
+        total=SPOTIFY_TRACK_API_TIMEOUT_SECONDS,
+        connect=5,
+        sock_connect=5,
+        sock_read=SPOTIFY_TRACK_API_TIMEOUT_SECONDS,
+    )
+    try:
+        async with ClientSession(timeout=timeout) as session:
+            async with session.post(
+                SPOTIFY_TOKEN_ENDPOINT,
+                data={"grant_type": "client_credentials"},
+                auth=BasicAuth(client_id, client_secret),
+            ) as response:
+                if response.status != 200:
+                    logger.debug("Spotify token request failed for track %s with status=%s", track_id, response.status)
+                    return None
+                token_payload = await response.json()
+
+            access_token = str(token_payload.get("access_token") or "").strip()
+            if not access_token:
+                return None
+
+            async with session.get(
+                SPOTIFY_TRACK_API_ENDPOINT.format(track_id=track_id),
+                headers={"Authorization": f"Bearer {access_token}"},
+            ) as response:
+                if response.status != 200:
+                    logger.debug("Spotify track metadata lookup failed for track %s with status=%s", track_id, response.status)
+                    return None
+                payload = await response.json()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Spotify track metadata fallback failed for track %s: %s", track_id, exc, exc_info=True)
+        return None
+
+    return payload if isinstance(payload, dict) else None
+
+
+async def _fetch_spotify_track_oembed_metadata(query: str) -> dict[str, Any] | None:
+    timeout = ClientTimeout(
+        total=SPOTIFY_TRACK_API_TIMEOUT_SECONDS,
+        connect=5,
+        sock_connect=5,
+        sock_read=SPOTIFY_TRACK_API_TIMEOUT_SECONDS,
+    )
+    try:
+        async with ClientSession(timeout=timeout) as session:
+            async with session.get(SPOTIFY_OEMBED_ENDPOINT, params={"url": query}) as response:
+                if response.status != 200:
+                    logger.debug("Spotify oEmbed lookup failed for %r with status=%s", query, response.status)
+                    return None
+                payload = await response.json()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Spotify oEmbed fallback failed for %r: %s", query, exc, exc_info=True)
+        return None
+
+    return payload if isinstance(payload, dict) else None
+
+
+def _resolved_song_from_spotify_metadata(
+    *,
+    query: str,
+    search_type: str,
+    track_id: str,
+    metadata: dict[str, Any],
+) -> ResolvedSong | None:
+    title = str(metadata.get("name") or metadata.get("title") or "").strip()
+    if not title:
+        return None
+
+    artists = metadata.get("artists")
+    artist_names = [
+        str(artist.get("name") or "").strip()
+        for artist in artists
+        if isinstance(artist, dict) and str(artist.get("name") or "").strip()
+    ] if isinstance(artists, list) else []
+    author = ", ".join(artist_names) or str(metadata.get("author_name") or "Unknown").strip() or "Unknown"
+
+    external_urls = metadata.get("external_urls") if isinstance(metadata.get("external_urls"), dict) else {}
+    album = metadata.get("album") if isinstance(metadata.get("album"), dict) else {}
+    album_urls = album.get("external_urls") if isinstance(album.get("external_urls"), dict) else {}
+    album_images = album.get("images") if isinstance(album.get("images"), list) else []
+    thumbnail = next(
+        (
+            str(image.get("url") or "").strip()
+            for image in album_images
+            if isinstance(image, dict) and str(image.get("url") or "").strip()
+        ),
+        str(metadata.get("thumbnail_url") or "").strip(),
+    ) or None
+    artist_url = next(
+        (
+            str((artist.get("external_urls") or {}).get("spotify") or "").strip()
+            for artist in artists
+            if isinstance(artist, dict)
+            and isinstance(artist.get("external_urls"), dict)
+            and str((artist.get("external_urls") or {}).get("spotify") or "").strip()
+        ),
+        str(metadata.get("artist_url") or "").strip(),
+    ) or None
+    canonical_url = (
+        str(external_urls.get("spotify") or "").strip()
+        or str(metadata.get("spotify_url") or "").strip()
+        or f"https://open.spotify.com/track/{track_id}"
+    )
+    album_name = str(album.get("name") or metadata.get("album_name") or "").strip() or None
+    album_url = str(album_urls.get("spotify") or metadata.get("album_url") or "").strip() or None
+    preview_url = str(metadata.get("preview_url") or "").strip() or None
+    search_query = " ".join(part for part in (title, author if author != "Unknown" else "") if part).strip() or title
+
+    return ResolvedSong(
+        query=query,
+        search_type=search_type,
+        title=title,
+        author=author,
+        source="spotify",
+        canonical_url=canonical_url,
+        search_query=search_query,
+        thumbnail=thumbnail,
+        duration_ms=_coerce_int(metadata.get("duration_ms")),
+        album_name=album_name,
+        album_url=album_url,
+        artist_url=artist_url,
+        preview_url=preview_url,
+        is_preview=bool(preview_url),
+        track_id=str(metadata.get("id") or track_id).strip() or track_id,
+        is_playlist=False,
+        playlist_name=None,
+        track_count=1,
+        resolved_by="spotify_api",
+    )
 
 
 def _is_probably_url(value: str) -> bool:

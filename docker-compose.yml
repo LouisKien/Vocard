@@ -56,7 +56,17 @@ services:
 
   lavalink:
     image: ghcr.io/lavalink-devs/lavalink:4.2.2
-    user: "${UID:-1000}:${GID:-1000}"
+    # Bootstrap the plugins directory as root, then drop back to the image's lavalink user.
+    user: root
+    entrypoint:
+      - /bin/sh
+      - -lc
+      - |
+        mkdir -p /opt/Lavalink/plugins
+        chown -R lavalink:lavalink /opt/Lavalink/plugins
+        chmod -R 755 /opt/Lavalink/plugins
+        cd /opt/Lavalink
+        exec setpriv --reuid=lavalink --regid=lavalink --init-groups java -jar Lavalink.jar
     restart: unless-stopped
     init: true
     stop_grace_period: 45s
@@ -69,6 +79,7 @@ services:
         condition: service_healthy
     volumes:
       - ./lavalink/application.yml:/opt/Lavalink/application.yml:ro
+      - lavalink_plugins:/opt/Lavalink/plugins
     healthcheck:
       test:
         [
@@ -104,6 +115,7 @@ services:
 
 volumes:
   mongo_data:
+  lavalink_plugins:
 
 networks:
   backend:

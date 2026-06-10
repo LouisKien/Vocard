@@ -275,6 +275,70 @@ def test_play_refreshes_controller_after_playlist_confirmation(monkeypatch) -> N
     assert player.order.index("message") < player.order.index("refresh_controller")
 
 
+def test_play_keyword_only_uses_healthy_node_fallback_when_player_lookup_is_stale(monkeypatch) -> None:
+    class _StalePlayer(_FakePlayer):
+        def __init__(self) -> None:
+            super().__init__(tracks=None, is_playing=False)
+            self.node = SimpleNamespace(_available=False, is_connected=False)
+
+        async def get_tracks(self, _query=None, requester=None, search_type=None, query=None):
+            self.order.append("get_tracks:stale")
+            raise voicelink.TrackLoadError("stale lavalink session")
+
+    class _HealthyNode:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        async def get_tracks(self, query, *, requester=None, search_type=None):
+            self.calls.append(query)
+            return [
+                SimpleNamespace(
+                    title="Nơi Này Có Anh",
+                    uri="https://www.youtube.com/watch?v=FN7ALfpGxiI",
+                    author="Sơn Tùng M-TP",
+                    formatted_length="04:39",
+                    is_stream=False,
+                )
+            ]
+
+    player = _StalePlayer()
+    ctx = SimpleNamespace(
+        guild=SimpleNamespace(voice_client=player, id=123),
+        author=SimpleNamespace(mention="@user"),
+        interaction=None,
+    )
+    cog = Basic(_FakeBot())
+    healthy_node = _HealthyNode()
+
+    async def fake_resolve_song(query: str):
+        assert query == "noi nay co anh"
+        return SimpleNamespace(
+            canonical_url="https://www.youtube.com/watch?v=FN7ALfpGxiI",
+            search_query="Noi Nay Co Anh Son Tung M-TP",
+            source="youtube",
+            resolved_by="vocard",
+        )
+
+    async def fake_dispatch_message(*_args, **_kwargs):
+        player.order.append("message")
+        return None
+
+    async def fake_send_localized_message(*_args, **_kwargs):
+        player.order.append(f"localized:{_args[1]}")
+        return None
+
+    monkeypatch.setattr("cogs.basic.resolve_song", fake_resolve_song)
+    monkeypatch.setattr("cogs.basic.dispatch_message", fake_dispatch_message)
+    monkeypatch.setattr("cogs.basic.send_localized_message", fake_send_localized_message)
+    monkeypatch.setattr(voicelink.NodePool, "get_node", classmethod(lambda cls, identifier=None: healthy_node))
+
+    asyncio.run(Basic.play.callback(cog, ctx, query="noi nay co anh", start="0", end="0"))
+
+    assert "message" in player.order
+    assert all(entry != "localized:player.errors.noTrackFound" for entry in player.order)
+    assert healthy_node.calls == ["https://www.youtube.com/watch?v=FN7ALfpGxiI"]
+
+
 @pytest.mark.parametrize(
     ("callback", "kwargs"),
     [
@@ -595,6 +659,85 @@ def test_play_does_not_send_spotify_playlist_loading_notice_for_spotify_track(mo
     assert "dispatch" in sent_keys
 
 
+def test_play_uses_spotify_track_metadata_fallback_when_primary_lookup_faults(monkeypatch) -> None:
+    class _FaultySpotifyPlayer(_FakePlayer):
+        def __init__(self) -> None:
+            super().__init__(tracks=None, is_playing=False)
+
+        async def get_tracks(self, _query=None, requester=None, search_type=None, query=None):
+            self.order.append("get_tracks:primary")
+            raise TrackLoadError("Something went wrong while looking up the track. [fault]")
+
+    class _HealthyNode:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        @property
+        def is_connected(self) -> bool:
+            return True
+
+        @property
+        def _available(self) -> bool:
+            return True
+
+        async def get_tracks(self, query, *, requester=None, search_type=None):
+            self.calls.append(query)
+            return [
+                SimpleNamespace(
+                    title="Die For You",
+                    uri="https://www.youtube.com/watch?v=MVPTGNGiI-4",
+                    author="The Weeknd",
+                    formatted_length="04:20",
+                    is_stream=False,
+                )
+            ]
+
+    player = _FaultySpotifyPlayer()
+    ctx = SimpleNamespace(
+        guild=SimpleNamespace(voice_client=player, id=123),
+        author=SimpleNamespace(mention="@user"),
+        interaction=None,
+    )
+    cog = Basic(_FakeBot())
+    healthy_node = _HealthyNode()
+
+    async def fake_resolve_song(query: str):
+        assert query.startswith("https://open.spotify.com/track/")
+        return SimpleNamespace(
+            canonical_url="https://open.spotify.com/track/2Ch7LmS7r2Gy2kc64wv3Bz",
+            search_query="Die For You The Weeknd",
+            source="spotify",
+            resolved_by="spotify_api",
+        )
+
+    async def fake_dispatch_message(*_args, **_kwargs):
+        player.order.append("message")
+        return None
+
+    async def fake_send_localized_message(*_args, **_kwargs):
+        player.order.append(f"localized:{_args[1]}")
+        return None
+
+    monkeypatch.setattr("cogs.basic.resolve_song", fake_resolve_song)
+    monkeypatch.setattr("cogs.basic.dispatch_message", fake_dispatch_message)
+    monkeypatch.setattr("cogs.basic.send_localized_message", fake_send_localized_message)
+    monkeypatch.setattr(voicelink.NodePool, "get_node", classmethod(lambda cls, identifier=None: healthy_node))
+
+    asyncio.run(
+        Basic.play.callback(
+            cog,
+            ctx,
+            query="https://open.spotify.com/track/2Ch7LmS7r2Gy2kc64wv3Bz?si=test",
+            start="0",
+            end="0",
+        )
+    )
+
+    assert "message" in player.order
+    assert all(entry != "localized:player.errors.noTrackFound" for entry in player.order)
+    assert healthy_node.calls == ["Die For You The Weeknd"]
+
+
 def test_spotify_playlist_loading_notice_wraps_track_load_error_in_user_friendly_error(monkeypatch) -> None:
     player = _FakePlayer(tracks=_make_playlist(), is_playing=False)
     ctx = SimpleNamespace(
@@ -892,6 +1035,88 @@ def test_play_falls_back_to_resolved_search_query_when_keyword_lookup_returns_em
     assert requested_queries == ["vì sao tôi là gay", resolved_search_query]
     assert "add_track" in player.order
     assert "message" in player.order
+
+
+def test_play_uses_youtube_track_url_directly_without_resolver_fallback(monkeypatch) -> None:
+    youtube_url = "https://youtu.be/pVOmhVPioKE?si=63tQR81xt0EtwYr0"
+    track = SimpleNamespace(
+        title="Die For You",
+        uri="https://www.youtube.com/watch?v=pVOmhVPioKE",
+        author="VALORANT Vietnam",
+        formatted_length="03:39",
+        is_stream=False,
+    )
+    requested_queries: list[str] = []
+    player = _FakePlayer(tracks=None, is_playing=False)
+    ctx = SimpleNamespace(
+        guild=SimpleNamespace(voice_client=player, id=123),
+        channel=SimpleNamespace(id=608),
+        author=SimpleNamespace(mention="@user"),
+        interaction=None,
+    )
+    cog = Basic(_FakeBot())
+
+    async def fake_get_tracks(query=None, requester=None, search_type=None, **_kwargs):
+        requested_queries.append(query)
+        player.order.append(f"get_tracks:{query}")
+        if query == youtube_url:
+            return [track]
+        raise AssertionError(f"Unexpected query: {query!r}")
+
+    async def forbidden_resolve_song(*_args, **_kwargs):
+        raise AssertionError("youtube track URLs must not trigger resolver fallback")
+
+    async def fake_dispatch_message(*_args, **_kwargs):
+        player.order.append("message")
+        return None
+
+    player.get_tracks = fake_get_tracks
+    monkeypatch.setattr("cogs.basic.resolve_song", forbidden_resolve_song)
+    monkeypatch.setattr("cogs.basic.dispatch_message", fake_dispatch_message)
+
+    asyncio.run(Basic.play.callback(cog, ctx, query=youtube_url, start="0", end="0"))
+
+    assert requested_queries == [youtube_url]
+    assert "add_track" in player.order
+    assert "message" in player.order
+
+
+def test_play_loads_youtube_playlist_url_through_playlist_branch(monkeypatch) -> None:
+    playlist_url = "https://www.youtube.com/watch?v=N8nGig78lNs&list=PLPkGxYulfrUapw2V_DFc1Nyc2GOFFS50Z&pp=sAgC"
+    player = _FakePlayer(tracks=None, is_playing=False)
+    ctx = SimpleNamespace(
+        guild=SimpleNamespace(voice_client=player, id=123),
+        channel=SimpleNamespace(id=609),
+        author=SimpleNamespace(mention="@user"),
+        interaction=None,
+    )
+    cog = Basic(_FakeBot())
+    sent_keys: list[str] = []
+
+    async def fake_get_tracks(query=None, requester=None, search_type=None, **_kwargs):
+        player.order.append(f"get_tracks:{query}")
+        if query == playlist_url:
+            return _make_playlist()
+        raise AssertionError(f"Unexpected query: {query!r}")
+
+    async def forbidden_resolve_song(*_args, **_kwargs):
+        raise AssertionError("youtube playlist URLs must not trigger resolver fallback")
+
+    async def fake_send_localized_message(*_args, **_kwargs):
+        sent_keys.append(_args[1])
+        player.order.append("playlist_message")
+        return None
+
+    player.get_tracks = fake_get_tracks
+    monkeypatch.setattr("cogs.basic.resolve_song", forbidden_resolve_song)
+    monkeypatch.setattr("cogs.basic.send_localized_message", fake_send_localized_message)
+
+    asyncio.run(Basic.play.callback(cog, ctx, query=playlist_url, start="0", end="0"))
+
+    assert f"get_tracks:{playlist_url}" in player.order
+    assert "add_track" in player.order
+    assert "player.playback.spotifyPlaylistLoading" not in sent_keys
+    assert "player.playback.playlistLoad" in sent_keys
 
 
 def test_search_falls_back_to_resolved_search_queries_when_keyword_lookup_returns_empty(monkeypatch) -> None:

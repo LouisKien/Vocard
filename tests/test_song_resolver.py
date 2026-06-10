@@ -299,12 +299,66 @@ def test_search_songs_does_not_use_direct_fallback_for_spotify_urls(
     async def forbidden_direct_fallback(*_args, **_kwargs) -> list[ResolvedSong]:
         raise AssertionError("spotify URL search must stay on the primary Lavalink/LavaSrc path")
 
+    async def no_spotify_metadata(*_args, **_kwargs) -> ResolvedSong | None:
+        return None
+
     monkeypatch.setattr(NodePool, "get_node", classmethod(lambda cls, identifier=None: FakeNode()))
+    monkeypatch.setattr(song_resolver_module, "_resolve_spotify_track_fallback", no_spotify_metadata)
     monkeypatch.setattr(song_resolver_module, "_search_songs_direct_fallback", forbidden_direct_fallback)
 
     results = asyncio.run(search_songs(spotify_url, search_type="youtube", limit=5))
 
     assert results == []
+
+
+def test_search_songs_falls_back_to_spotify_api_metadata_for_spotify_track_urls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spotify_url = "https://open.spotify.com/track/190jyVPHYjAqEaOGmMzdyk?si=test"
+
+    class FakeNode:
+        async def get_tracks(self, query: str, *, requester: object, search_type: object) -> list[object] | None:
+            assert query == spotify_url
+            assert requester is None
+            return None
+
+    async def fake_spotify_metadata(query: str, *, search_type: str) -> ResolvedSong | None:
+        assert query == spotify_url
+        assert search_type == "YOUTUBE"
+        return ResolvedSong(
+            query=spotify_url,
+            search_type="YOUTUBE",
+            title="Beauty And A Beat",
+            author="Justin Bieber, Nicki Minaj",
+            source="spotify",
+            canonical_url="https://open.spotify.com/track/190jyVPHYjAqEaOGmMzdyk",
+            search_query="Beauty And A Beat Justin Bieber Nicki Minaj",
+            thumbnail="https://img.example/cover.jpg",
+            duration_ms=227000,
+            album_name="Believe",
+            album_url="https://open.spotify.com/album/album-id",
+            artist_url="https://open.spotify.com/artist/artist-id",
+            preview_url=None,
+            is_preview=False,
+            track_id="190jyVPHYjAqEaOGmMzdyk",
+            is_playlist=False,
+            playlist_name=None,
+            track_count=1,
+            resolved_by="spotify_api",
+        )
+
+    async def forbidden_direct_fallback(*_args, **_kwargs) -> list[ResolvedSong]:
+        raise AssertionError("spotify URL search should not fall through to yt-dlp direct fallback")
+
+    monkeypatch.setattr(NodePool, "get_node", classmethod(lambda cls, identifier=None: FakeNode()))
+    monkeypatch.setattr(song_resolver_module, "_resolve_spotify_track_fallback", fake_spotify_metadata)
+    monkeypatch.setattr(song_resolver_module, "_search_songs_direct_fallback", forbidden_direct_fallback)
+
+    results = asyncio.run(search_songs(spotify_url, search_type="youtube", limit=5))
+
+    assert len(results) == 1
+    assert results[0].title == "Beauty And A Beat"
+    assert results[0].resolved_by == "spotify_api"
 
 
 def test_resolve_song_does_not_use_direct_fallback_for_spotify_urls(
@@ -321,11 +375,66 @@ def test_resolve_song_does_not_use_direct_fallback_for_spotify_urls(
     async def forbidden_direct_fallback(*_args, **_kwargs) -> ResolvedSong | None:
         raise AssertionError("spotify URL resolve must stay on the primary Lavalink/LavaSrc path")
 
+    async def no_spotify_metadata(*_args, **_kwargs) -> ResolvedSong | None:
+        return None
+
     monkeypatch.setattr(NodePool, "get_node", classmethod(lambda cls, identifier=None: FakeNode()))
+    monkeypatch.setattr(song_resolver_module, "_resolve_spotify_track_fallback", no_spotify_metadata)
     monkeypatch.setattr(song_resolver_module, "_resolve_song_direct_fallback", forbidden_direct_fallback)
 
     with pytest.raises(TrackLoadError, match="no tracks were returned"):
         asyncio.run(resolve_song(spotify_url, search_type="youtube"))
+
+
+def test_resolve_song_falls_back_to_spotify_api_metadata_for_spotify_track_urls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spotify_url = "https://open.spotify.com/track/190jyVPHYjAqEaOGmMzdyk?si=test"
+
+    class FakeNode:
+        async def get_tracks(self, query: str, *, requester: object, search_type: object) -> list[object] | None:
+            assert query == spotify_url
+            assert requester is None
+            return None
+
+    async def fake_spotify_metadata(query: str, *, search_type: str) -> ResolvedSong | None:
+        assert query == spotify_url
+        assert search_type == "YOUTUBE"
+        return ResolvedSong(
+            query=spotify_url,
+            search_type="YOUTUBE",
+            title="Die For You",
+            author="The Weeknd",
+            source="spotify",
+            canonical_url="https://open.spotify.com/track/2Ch7LmS7r2Gy2kc64wv3Bz",
+            search_query="Die For You The Weeknd",
+            thumbnail="https://img.example/die-for-you.jpg",
+            duration_ms=260252,
+            album_name="Starboy",
+            album_url="https://open.spotify.com/album/2ODvWsOgouMbaA5xf0RkJe",
+            artist_url="https://open.spotify.com/artist/1Xyo4u8uXC1ZmMpatF05PJ",
+            preview_url=None,
+            is_preview=False,
+            track_id="2Ch7LmS7r2Gy2kc64wv3Bz",
+            is_playlist=False,
+            playlist_name=None,
+            track_count=1,
+            resolved_by="spotify_api",
+        )
+
+    async def forbidden_direct_fallback(*_args, **_kwargs) -> ResolvedSong | None:
+        raise AssertionError("spotify URL resolve should not fall through to yt-dlp direct fallback")
+
+    monkeypatch.setattr(NodePool, "get_node", classmethod(lambda cls, identifier=None: FakeNode()))
+    monkeypatch.setattr(song_resolver_module, "_resolve_spotify_track_fallback", fake_spotify_metadata)
+    monkeypatch.setattr(song_resolver_module, "_resolve_song_direct_fallback", forbidden_direct_fallback)
+
+    result = asyncio.run(resolve_song(spotify_url, search_type="youtube"))
+
+    assert result.title == "Die For You"
+    assert result.author == "The Weeknd"
+    assert result.search_query == "Die For You The Weeknd"
+    assert result.resolved_by == "spotify_api"
 
 
 def test_song_resolver_http_resolve_response_is_flat(monkeypatch: pytest.MonkeyPatch) -> None:
