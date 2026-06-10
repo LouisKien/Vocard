@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import pytest
+
+import voicelink.objects as objects_module
 from voicelink.objects import Playlist, Track
 from voicelink.pool import Node
 from voicelink.transformer import DataWriter, decode, encode
@@ -66,6 +69,27 @@ def test_track_prefers_lavasrc_artwork_fallback_aliases() -> None:
     )
 
     assert track.thumbnail == "https://cdn.example/album-art.jpg"
+
+
+def test_track_uses_source_name_without_touching_tldextract(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_extract(_value: str) -> object:
+        raise AssertionError("tldextract should not run when sourceName is already present")
+
+    monkeypatch.setattr(objects_module, "extract", fail_extract)
+
+    track = Track(
+        info={
+            "identifier": "spotify-track-id",
+            "title": "Song",
+            "author": "Artist",
+            "uri": "https://open.spotify.com/track/spotify-track-id",
+            "sourceName": "spotify",
+            "length": 123456,
+        },
+        requester=None,
+    )
+
+    assert track.source == "spotify"
 
 
 def test_playlist_exposes_plugin_info_metadata() -> None:

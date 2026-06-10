@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Any
 
@@ -15,6 +17,22 @@ from .pool import NodePool
 
 logger = logging.getLogger(__name__)
 AUTOCOMPLETE_LOOKUP_TIMEOUT_SECONDS = 2.0
+_LOW_SIGNAL_TRACK_TERMS = {
+    "cover",
+    "karaoke",
+    "instrumental",
+    "live",
+    "remix",
+    "slowed",
+    "reverb",
+    "sped",
+    "speed",
+    "up",
+    "nightcore",
+    "short",
+    "ver",
+    "version",
+}
 
 
 @dataclass(frozen=True)
@@ -83,7 +101,7 @@ async def search_songs(
     if isinstance(tracks, Playlist):
         if not tracks.tracks:
             return []
-        track_items = tracks.tracks[:limit]
+        track_items = _rank_tracks(normalized_query, tracks.tracks)[:limit]
         return [
             _track_to_resolution(
                 track,
@@ -97,6 +115,7 @@ async def search_songs(
         ]
     if not tracks:
         return []
+    ranked_tracks = _rank_tracks(normalized_query, list(tracks))
     return [
         _track_to_resolution(
             track,
@@ -106,7 +125,7 @@ async def search_songs(
             playlist_name=None,
             track_count=1,
         )
-        for track in tracks[:limit]
+        for track in ranked_tracks[:limit]
     ]
 
 
@@ -248,7 +267,8 @@ async def _lookup_first_track(
         return tracks.tracks[0], True, tracks.name, tracks.track_count
     if not tracks:
         raise TrackLoadError("no tracks were returned")
-    return tracks[0], False, None, 1
+    ranked_tracks = _rank_tracks(query, list(tracks))
+    return ranked_tracks[0], False, None, 1
 
 
 def _resolved_song_to_payload(result: ResolvedSong) -> dict[str, Any]:
@@ -291,3 +311,61 @@ def _coerce_limit(value: Any, *, default: int, maximum: int) -> int:
     if parsed is None:
         return default
     return max(1, min(maximum, parsed))
+
+
+def _rank_tracks(query: str, tracks: list[Track]) -> list[Track]:
+    return sorted(
+        tracks,
+        key=lambda track: _song_match_score(
+            query,
+            title=track.title,
+            author=track.author,
+            canonical_url=track.uri,
+        ),
+        reverse=True,
+    )
+
+
+def _song_match_score(query: str, *, title: str, author: str, canonical_url: str) -> int:
+    normalized_query = _normalize_match_text(query)
+    normalized_title = _normalize_match_text(title)
+    normalized_author = _normalize_match_text(author)
+    normalized_url = canonical_url.strip().lower()
+    combined = " ".join(part for part in (normalized_title, normalized_author) if part).strip()
+    query_tokens = set(normalized_query.split())
+    candidate_tokens = set(combined.split())
+
+    score = 0
+    raw_query = query.strip().lower()
+    if raw_query and normalized_url == raw_query:
+        score += 2200
+    if normalized_title == normalized_query:
+        score += 1400
+    if combined == normalized_query:
+        score += 1300
+    if normalized_title.startswith(normalized_query) and normalized_query:
+        score += 1000
+    if normalized_query and normalized_query in normalized_title:
+        score += 850
+    if combined.startswith(normalized_query) and normalized_query:
+        score += 700
+    if normalized_query and normalized_query in combined:
+        score += 600
+    if raw_query and raw_query in normalized_url:
+        score += 250
+    if query_tokens:
+        score += int(320 * len(query_tokens & candidate_tokens) / len(query_tokens))
+    noisy_terms = (candidate_tokens - query_tokens) & _LOW_SIGNAL_TRACK_TERMS
+    score -= 70 * len(noisy_terms)
+    if normalized_title in {"", "unknown"}:
+        score -= 500
+    if normalized_author in {"", "unknown"}:
+        score -= 120
+    return score
+
+
+def _normalize_match_text(value: str) -> str:
+    decomposed = unicodedata.normalize("NFKD", value)
+    without_accents = "".join(char for char in decomposed if not unicodedata.combining(char))
+    collapsed = re.sub(r"[^a-z0-9]+", " ", without_accents.lower())
+    return " ".join(collapsed.split())

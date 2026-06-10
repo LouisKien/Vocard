@@ -108,6 +108,50 @@ def test_search_songs_returns_empty_list_when_no_tracks_found(monkeypatch: pytes
     assert results == []
 
 
+def test_search_songs_ranks_exact_match_first(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeNode:
+        async def get_tracks(self, query: str, *, requester: object, search_type: object) -> list[object]:
+            assert query == "Vì Sao Tôi Là Gay"
+            assert requester is None
+            assert getattr(search_type, "name", None) == "YOUTUBE"
+            return [
+                SimpleNamespace(
+                    title="Bài khác hoàn toàn",
+                    author="Ca sĩ khác",
+                    source="youtube",
+                    uri="https://www.youtube.com/watch?v=zzz",
+                    thumbnail=None,
+                    length=150000,
+                    album_name=None,
+                    album_url=None,
+                    artist_url=None,
+                    preview_url=None,
+                    is_preview=False,
+                    track_id="track-id-1",
+                ),
+                SimpleNamespace(
+                    title="Vì Sao Tôi Là Gay",
+                    author="MiiNa",
+                    source="youtube",
+                    uri="https://www.youtube.com/watch?v=exact",
+                    thumbnail=None,
+                    length=180000,
+                    album_name=None,
+                    album_url=None,
+                    artist_url=None,
+                    preview_url=None,
+                    is_preview=False,
+                    track_id="track-id-2",
+                ),
+            ]
+
+    monkeypatch.setattr(NodePool, "get_node", classmethod(lambda cls, identifier=None: FakeNode()))
+
+    results = asyncio.run(search_songs("Vì Sao Tôi Là Gay", search_type="youtube", limit=2))
+
+    assert [item.title for item in results] == ["Vì Sao Tôi Là Gay", "Bài khác hoàn toàn"]
+
+
 def test_song_resolver_http_resolve_response_is_flat(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_resolve_song(query: str, *, search_type: str | None = None) -> ResolvedSong:
         assert query == "See Tình"

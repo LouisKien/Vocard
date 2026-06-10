@@ -92,7 +92,7 @@ class Track:
         self.title: str = info.get("title", "Unknown")
         self.author: str = info.get("author", "Unknown")
         self.uri: str = info.get("uri", "https://discord.com/application-directory/605618911471468554")
-        self.source: str = info.get("sourceName", extract(self.uri).domain)
+        self.source: str = info.get("sourceName") or extract(self.uri).domain
         self._search_type: SearchType = search_type
 
         self.thumbnail: Optional[str] = _first_present(info, "artworkUrl", "albumArtUrl", "thumbnail")
