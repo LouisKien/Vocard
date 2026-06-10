@@ -106,40 +106,57 @@ class Basic(commands.Cog):
         normalized_query = query.strip()
         return bool(normalized_query) and not voicelink.pool.URL_REGEX.match(normalized_query)
 
+    @staticmethod
+    def _resolution_identifiers(resolved_track: object) -> list[str]:
+        canonical_url = str(getattr(resolved_track, "canonical_url", "") or "").strip()
+        search_query = str(getattr(resolved_track, "search_query", "") or "").strip()
+        source = str(getattr(resolved_track, "source", "") or "").strip().lower()
+        resolved_by = str(getattr(resolved_track, "resolved_by", "") or "").strip().lower()
+
+        identifiers: list[str] = []
+        if search_query and source == "youtube" and resolved_by == "direct":
+            identifiers.append(search_query)
+        if canonical_url:
+            identifiers.append(canonical_url)
+        if search_query and search_query not in identifiers:
+            identifiers.append(search_query)
+        return identifiers
+
     async def _hydrate_resolved_tracks(
         self,
         player: voicelink.Player,
         *,
-        canonical_urls: list[str],
+        resolved_tracks: list[object],
         requester: discord.Member | discord.User,
         search_type: voicelink.SearchType | None = None,
     ) -> list[voicelink.Track]:
         tracks: list[voicelink.Track] = []
-        seen_urls: set[str] = set()
+        seen_identifiers: set[str] = set()
 
-        for canonical_url in canonical_urls:
-            normalized_url = canonical_url.strip()
-            if not normalized_url or normalized_url in seen_urls:
-                continue
+        for resolved_track in resolved_tracks:
+            for identifier in self._resolution_identifiers(resolved_track):
+                if not identifier or identifier in seen_identifiers:
+                    continue
 
-            seen_urls.add(normalized_url)
+                seen_identifiers.add(identifier)
 
-            try:
-                loaded_tracks = await player.get_tracks(
-                    normalized_url,
-                    requester=requester,
-                    search_type=search_type,
-                )
-            except (asyncio.TimeoutError, aiohttp.ClientError, voicelink.NodeException, voicelink.TrackLoadError):
-                continue
+                try:
+                    loaded_tracks = await player.get_tracks(
+                        identifier,
+                        requester=requester,
+                        search_type=search_type,
+                    )
+                except (asyncio.TimeoutError, aiohttp.ClientError, voicelink.NodeException, voicelink.TrackLoadError):
+                    continue
 
-            if isinstance(loaded_tracks, voicelink.Playlist):
-                candidate_tracks = loaded_tracks.tracks
-            else:
-                candidate_tracks = loaded_tracks or []
+                if isinstance(loaded_tracks, voicelink.Playlist):
+                    candidate_tracks = loaded_tracks.tracks
+                else:
+                    candidate_tracks = loaded_tracks or []
 
-            if candidate_tracks:
-                tracks.append(candidate_tracks[0])
+                if candidate_tracks:
+                    tracks.append(candidate_tracks[0])
+                    break
 
         return tracks
 
@@ -158,20 +175,19 @@ class Basic(commands.Cog):
         try:
             if search_type is None:
                 resolved_track = await resolve_song(normalized_query)
-                canonical_urls = [resolved_track.canonical_url]
+                resolved_tracks = [resolved_track]
             else:
                 resolved_tracks = await search_songs(
                     normalized_query,
                     search_type=search_type.name,
                     limit=RESOLVER_FALLBACK_RESULT_LIMIT,
                 )
-                canonical_urls = [track.canonical_url for track in resolved_tracks]
         except Exception:
             return None
 
         hydrated_tracks = await self._hydrate_resolved_tracks(
             player,
-            canonical_urls=canonical_urls,
+            resolved_tracks=resolved_tracks,
             requester=requester,
             search_type=search_type,
         )

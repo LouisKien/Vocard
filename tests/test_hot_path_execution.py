@@ -834,8 +834,9 @@ def test_play_autocomplete_limits_remote_lookup_time(monkeypatch) -> None:
     assert captured == {"query": "vi sao", "limit": 5, "search_type": None}
 
 
-def test_play_falls_back_to_resolved_track_url_when_keyword_lookup_returns_empty(monkeypatch) -> None:
+def test_play_falls_back_to_resolved_search_query_when_keyword_lookup_returns_empty(monkeypatch) -> None:
     resolved_url = "https://www.youtube.com/watch?v=exact"
+    resolved_search_query = "Vì Sao Tôi Là Gay MiiNa"
     track = SimpleNamespace(
         title="Vì Sao Tôi Là Gay",
         uri=resolved_url,
@@ -858,14 +859,20 @@ def test_play_falls_back_to_resolved_track_url_when_keyword_lookup_returns_empty
         player.order.append(f"get_tracks:{query}")
         if query == "vì sao tôi là gay":
             return None
-        if query == resolved_url:
+        if query == resolved_search_query:
             return [track]
         raise AssertionError(f"Unexpected query: {query!r}")
 
     async def fake_resolve_song(query: str, *, search_type: str | None = None):
         assert query == "vì sao tôi là gay"
         assert search_type is None
-        return SimpleNamespace(canonical_url=resolved_url)
+        return SimpleNamespace(
+            canonical_url=resolved_url,
+            search_query=resolved_search_query,
+            source="youtube",
+            resolved_by="direct",
+            track_id="exact",
+        )
 
     async def fake_dispatch_message(*_args, **_kwargs):
         player.order.append("message")
@@ -882,19 +889,23 @@ def test_play_falls_back_to_resolved_track_url_when_keyword_lookup_returns_empty
 
     asyncio.run(Basic.play.callback(cog, ctx, query="vì sao tôi là gay", start="0", end="0"))
 
-    assert requested_queries == ["vì sao tôi là gay", resolved_url]
+    assert requested_queries == ["vì sao tôi là gay", resolved_search_query]
     assert "add_track" in player.order
     assert "message" in player.order
 
 
-def test_search_falls_back_to_resolver_results_when_keyword_lookup_returns_empty(monkeypatch) -> None:
+def test_search_falls_back_to_resolved_search_queries_when_keyword_lookup_returns_empty(monkeypatch) -> None:
     resolved_urls = [
         "https://www.youtube.com/watch?v=1",
         "https://www.youtube.com/watch?v=2",
     ]
+    resolved_search_queries = [
+        "Vì Sao Tôi Là Gay MiiNa",
+        "Vì Sao Artist 2",
+    ]
     requested_queries: list[str] = []
     tracks_by_url = {
-        resolved_urls[0]: [
+        resolved_search_queries[0]: [
             SimpleNamespace(
                 title="Vì Sao Tôi Là Gay",
                 uri=resolved_urls[0],
@@ -903,7 +914,7 @@ def test_search_falls_back_to_resolver_results_when_keyword_lookup_returns_empty
                 is_stream=False,
             )
         ],
-        resolved_urls[1]: [
+        resolved_search_queries[1]: [
             SimpleNamespace(
                 title="Vì Sao",
                 uri=resolved_urls[1],
@@ -936,8 +947,20 @@ def test_search_falls_back_to_resolver_results_when_keyword_lookup_returns_empty
         assert limit == 10
         assert search_type == voicelink.SearchType.YOUTUBE.name
         return [
-            SimpleNamespace(canonical_url=resolved_urls[0]),
-            SimpleNamespace(canonical_url=resolved_urls[1]),
+            SimpleNamespace(
+                canonical_url=resolved_urls[0],
+                search_query=resolved_search_queries[0],
+                source="youtube",
+                resolved_by="direct",
+                track_id="1",
+            ),
+            SimpleNamespace(
+                canonical_url=resolved_urls[1],
+                search_query=resolved_search_queries[1],
+                source="youtube",
+                resolved_by="direct",
+                track_id="2",
+            ),
         ]
 
     class _FakeSearchView:
@@ -981,7 +1004,7 @@ def test_search_falls_back_to_resolver_results_when_keyword_lookup_returns_empty
 
     asyncio.run(Basic.search.callback(cog, ctx, query="vì sao", platform=voicelink.SearchType.YOUTUBE.name))
 
-    assert requested_queries == ["vì sao", resolved_urls[0], resolved_urls[1]]
+    assert requested_queries == ["vì sao", resolved_search_queries[0], resolved_search_queries[1]]
     assert player.order.index("search_results") < player.order.index("add_track")
     assert player.order.index("message") < player.order.index("refresh_controller")
 
