@@ -17,9 +17,10 @@ from .objects import Playlist, Track
 from .pool import NodePool
 
 logger = logging.getLogger(__name__)
-AUTOCOMPLETE_LOOKUP_TIMEOUT_SECONDS = 1.0
+AUTOCOMPLETE_LOOKUP_TIMEOUT_SECONDS = 2.0
 AUTOCOMPLETE_DIRECT_LOOKUP_TIMEOUT_SECONDS = 1.8
 DIRECT_RESOLVE_TIMEOUT_SECONDS = 4.0
+AUTOCOMPLETE_DIRECT_RESULT_LIMIT = 5
 _LOW_SIGNAL_TRACK_TERMS = {
     "cover",
     "karaoke",
@@ -75,6 +76,8 @@ async def resolve_song(query: str, *, search_type: str | None = None) -> Resolve
             resolved_search_type,
         )
     except (NoNodesAvailable, TrackLoadError) as exc:
+        if not _should_allow_direct_fallback(normalized_query, search_type=resolved_search_type):
+            raise
         fallback = await _resolve_song_direct_fallback(
             normalized_query,
             search_type=resolved_search_type.name,
@@ -114,6 +117,8 @@ async def search_songs(
         )
     except (asyncio.TimeoutError, NoNodesAvailable, TrackLoadError) as exc:
         logger.debug("Song resolver search returned no quick result for query=%r: %s", normalized_query, exc)
+        if not _should_allow_direct_fallback(normalized_query, search_type=resolved_search_type):
+            return []
         return await _search_songs_direct_fallback(
             normalized_query,
             search_type=resolved_search_type.name,
@@ -121,6 +126,8 @@ async def search_songs(
         )
     if isinstance(tracks, Playlist):
         if not tracks.tracks:
+            if not _should_allow_direct_fallback(normalized_query, search_type=resolved_search_type):
+                return []
             return await _search_songs_direct_fallback(
                 normalized_query,
                 search_type=resolved_search_type.name,
@@ -139,6 +146,8 @@ async def search_songs(
             for track in track_items
         ]
     if not tracks:
+        if not _should_allow_direct_fallback(normalized_query, search_type=resolved_search_type):
+            return []
         return await _search_songs_direct_fallback(
             normalized_query,
             search_type=resolved_search_type.name,
@@ -438,7 +447,7 @@ async def _search_songs_direct_fallback(
 
 def _search_songs_directly(query: str, search_type: str, limit: int) -> list[ResolvedSong]:
     ytdlp = _load_yt_dlp()
-    direct_limit = max(1, min(limit, 1))
+    direct_limit = max(1, min(limit, AUTOCOMPLETE_DIRECT_RESULT_LIMIT))
     candidates = _build_direct_candidates(query, limit=direct_limit)
     last_error: Exception | None = None
     with ytdlp.YoutubeDL(_ytdlp_options()) as ydl:
@@ -468,6 +477,15 @@ def _build_direct_candidates(query: str, *, limit: int) -> list[str]:
     if _is_probably_url(normalized_query):
         return [normalized_query]
     return [f"ytsearch{max(1, limit)}:{normalized_query}"]
+
+
+def _should_allow_direct_fallback(query: str, *, search_type: SearchType) -> bool:
+    normalized_query = query.strip()
+    if not normalized_query:
+        return False
+    if _is_probably_url(normalized_query):
+        return not _is_spotify_url(normalized_query)
+    return search_type in {SearchType.YOUTUBE, SearchType.YOUTUBE_MUSIC}
 
 
 def _load_yt_dlp() -> Any:
@@ -564,3 +582,8 @@ def _infer_source_from_url(url: str) -> str:
 def _is_probably_url(value: str) -> bool:
     parsed = urlparse(value)
     return bool(parsed.scheme and parsed.netloc)
+
+
+def _is_spotify_url(value: str) -> bool:
+    parsed = urlparse(value.strip())
+    return bool(parsed.scheme and parsed.netloc and "spotify.com" in parsed.netloc.lower())
